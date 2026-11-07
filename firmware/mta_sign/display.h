@@ -31,7 +31,8 @@ enum AnimKind : uint8_t { ANIM_NONE = 0, ANIM_WALK, ANIM_CHASE, ANIM_PEEK, ANIM_
 AnimKind animFromName(const char* name);   // "walk", "chase", "peek" (unknown -> ANIM_NONE)
 
 // Screens
-void drawConnecting(Adafruit_GFX& g, uint32_t ms);
+// `detail` is a short status line, e.g. "WIFI", "LOADING", "ERR -1".
+void drawConnecting(Adafruit_GFX& g, uint32_t ms, const char* detail = nullptr);
 void drawTransit(Adafruit_GFX& g, const TransitData& t);
 
 // Draws one frame of an animation `elapsedMs` after it started, on top of

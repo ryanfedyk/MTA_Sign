@@ -41,7 +41,7 @@ int main(int argc, char** argv) {
   else if (scene == "weekend") { drawTransit(p, we); p.dump(f); frames = 1; }
   else if (scene == "weekend-ar") { we.l1 = 0; we.l2 = 7; drawTransit(p, we); p.dump(f); frames = 1; }
   else if (scene == "connecting") {
-    for (uint32_t t = 0; t < 1600; t += step) { drawConnecting(p, t); p.dump(f); frames++; }
+    for (uint32_t t = 0; t < 1600; t += step) { drawConnecting(p, t, "ERR -1"); p.dump(f); frames++; }
   } else if (scene == "message") {
     for (uint32_t t = 0;; t += step) {
       if (!drawMessage(p, "Dinner's ready!", 1, t)) break;

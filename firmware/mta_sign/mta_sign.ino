@@ -80,6 +80,10 @@ static TransitData gTransit;
 static SignSettings gSettings;
 static SemaphoreHandle_t gLock;
 
+// What the "CONNECTING" screen should say while there's no data yet.
+static volatile int gLastHttpCode = 0;      // 0 = no request finished yet
+static volatile bool gLastParseFailed = false;
+
 MatrixPanel_I2S_DMA* dma_display = nullptr;
 
 static void copyStr(char* dst, size_t n, const char* src) {
@@ -98,11 +102,15 @@ static bool httpGetJson(const char* url, JsonDocument& doc) {
   if (!https.begin(client, url)) return false;
   bool ok = false;
   int code = https.GET();
+  gLastHttpCode = code;
   if (code == HTTP_CODE_OK) {
     String payload = https.getString();
-    ok = !deserializeJson(doc, payload);
+    DeserializationError err = deserializeJson(doc, payload);
+    ok = !err;
+    gLastParseFailed = !ok;
+    if (err) Serial.printf("[net] %s: bad JSON (%s)\n", url, err.c_str());
   } else {
-    Serial.printf("GET %s -> %d\n", url, code);
+    Serial.printf("[net] %s -> HTTP %d (%s)\n", url, code, https.errorToString(code).c_str());
   }
   https.end();
   return ok;
@@ -127,6 +135,7 @@ static void fetchTransit() {
   xSemaphoreTake(gLock, portMAX_DELAY);
   gTransit = t;
   xSemaphoreGive(gLock);
+  Serial.printf("[net] transit ok: lay=%s L %d,%d  B %d,%d\n", t.lOnly ? "L" : "LB", t.l1, t.l2, t.b1, t.b2);
 }
 
 static void fetchSign() {
@@ -154,24 +163,55 @@ static void fetchSign() {
 }
 
 static void netTask(void*) {
-  uint32_t lastTransit = 0, lastSign = 0, offlineSince = 0, lastReconnect = 0;
-  bool first = true;
+  uint32_t lastTransit = 0, lastSign = 0, offlineSince = 0, lastAttempt = millis();
+  bool first = true, wasOnline = false;
   for (;;) {
     uint32_t now = millis();
     if (WiFi.status() != WL_CONNECTED) {
-      // Wi-Fi watchdog: retry every 10 s, reboot if it's been down for 5 minutes.
+      if (wasOnline) { Serial.println("[wifi] lost connection"); wasOnline = false; }
+      // Wi-Fi watchdog: give each attempt 30 s to finish, then start a fresh one.
+      // Reboot if we've been offline for 5 minutes.
       if (!offlineSince) offlineSince = now;
-      if (now - lastReconnect > 10000) { WiFi.reconnect(); lastReconnect = now; }
+      if (now - lastAttempt > 30000) {
+        Serial.printf("[wifi] still not connected (status %d), retrying\n", (int)WiFi.status());
+        WiFi.disconnect();
+        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        lastAttempt = now;
+      }
       if (now - offlineSince > WIFI_GIVE_UP_MS) ESP.restart();
       vTaskDelay(pdMS_TO_TICKS(500));
       continue;
     }
+    if (!wasOnline) {
+      Serial.printf("[wifi] connected, IP %s, signal %d dBm\n", WiFi.localIP().toString().c_str(), WiFi.RSSI());
+      wasOnline = true;
+    }
     offlineSince = 0;
 
-    if (first || now - lastTransit >= TRANSIT_EVERY_MS) { lastTransit = now; fetchTransit(); }
-    if (first || now - lastSign >= SIGN_EVERY_MS)       { lastSign = now;    fetchSign(); }
+    xSemaphoreTake(gLock, portMAX_DELAY);
+    bool haveData = gTransit.valid;
+    xSemaphoreGive(gLock);
+    // Until the first arrivals arrive, retry every 5 s instead of every 30 s.
+    uint32_t transitEvery = haveData ? TRANSIT_EVERY_MS : 5000;
+
+    if (first || now - lastTransit >= transitEvery) { lastTransit = now; fetchTransit(); }
+    if (first || now - lastSign >= SIGN_EVERY_MS)   { lastSign = now;    fetchSign(); }
     first = false;
     vTaskDelay(pdMS_TO_TICKS(250));
+  }
+}
+
+// Short status line for the CONNECTING screen.
+static void connectingDetail(char* out, size_t n) {
+  wl_status_t ws = WiFi.status();
+  if (ws != WL_CONNECTED) {
+    if (ws == WL_NO_SSID_AVAIL)       snprintf(out, n, "NO WIFI");    // network name not found
+    else if (ws == WL_CONNECT_FAILED) snprintf(out, n, "WIFI PASS?"); // usually a wrong password
+    else                              snprintf(out, n, "WIFI");
+  } else if (gLastHttpCode == 0 || gLastHttpCode == HTTP_CODE_OK) {
+    snprintf(out, n, gLastParseFailed ? "BAD DATA" : "LOADING");
+  } else {
+    snprintf(out, n, "ERR %d", (int)gLastHttpCode);
   }
 }
 
@@ -229,6 +269,7 @@ void setup() {
   dma_display->setBrightness8(DEFAULT_DAY_BRIGHTNESS);
   appliedBrightness = DEFAULT_DAY_BRIGHTNESS;
 
+  Serial.printf("\n[boot] MTA sign starting, connecting to Wi-Fi \"%s\"\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -285,7 +326,9 @@ void loop() {
   }
   if (mode != MODE_MESSAGE) {
     if (!t.valid) {
-      drawConnecting(*dma_display, now);
+      char detail[16];
+      connectingDetail(detail, sizeof detail);
+      drawConnecting(*dma_display, now, detail);
     } else {
       drawTransit(*dma_display, t);
       if (mode == MODE_ANIM && !drawAnim(*dma_display, currentAnim, now - modeStart)) {
