@@ -40,6 +40,11 @@ int main(int argc, char** argv) {
   if (scene == "weekday") { drawTransit(p, wk); p.dump(f); frames = 1; }
   else if (scene == "weekend") { drawTransit(p, we); p.dump(f); frames = 1; }
   else if (scene == "weekend-ar") { we.l1 = 0; we.l2 = 7; drawTransit(p, we); p.dump(f); frames = 1; }
+  else if (scene == "weekend-cases") {   // one frame per tricky combination
+    int cases[][2] = {{4, 11}, {12, 19}, {20, 28}, {0, 7}, {3, 0}, {7, -1}, {-1, -1}, {88, 98}};
+    for (auto& c : cases) { we.l1 = c[0]; we.l2 = c[1]; drawTransit(p, we); p.dump(f); frames++; }
+    strcpy(we.lLabel, "BK"); we.l1 = 6; we.l2 = 14; drawTransit(p, we); p.dump(f); frames++;
+  }
   else if (scene == "connecting") {
     for (uint32_t t = 0; t < 1600; t += step) { drawConnecting(p, t, "ERR -1"); p.dump(f); frames++; }
   } else if (scene == "message") {

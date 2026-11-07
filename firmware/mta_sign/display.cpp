@@ -1,4 +1,6 @@
 #include "display.h"
+#include "fonts.h"
+#include <stdio.h>
 #include <string.h>
 
 // ---------------------------------------------------------------------------
@@ -216,7 +218,6 @@ AnimKind animFromName(const char* name) {
 // ---------------------------------------------------------------------------
 // Text helpers (default 5x7 Adafruit font: 6px per char at size 1, 12px at size 2)
 // ---------------------------------------------------------------------------
-static int numChars(int v) { return v >= 100 ? 3 : (v >= 10 ? 2 : 1); }
 
 static void printAt(Adafruit_GFX& g, int x, int y, uint8_t size, uint16_t color, const char* s) {
   g.setTextWrap(false);
@@ -286,34 +287,114 @@ static void drawTwoRow(Adafruit_GFX& g, const TransitData& t) {
 }
 
 // ---------------------------------------------------------------------------
+// Custom type + shapes (see fonts.h)
+// ---------------------------------------------------------------------------
+static const char* const* smallGlyph(char c) {
+  for (const auto& gl : SMALL_FONT) if (gl.c == c) return gl.r;
+  return nullptr;
+}
+static const char* const* bigGlyph(char c) {
+  for (const auto& gl : BIG_FONT) if (gl.c == c) return gl.r;
+  return nullptr;
+}
+
+static void blit(Adafruit_GFX& g, const char* const* rows, int h, int x, int y, uint16_t color) {
+  for (int r = 0; r < h; r++)
+    for (int c = 0; rows[r][c]; c++)
+      if (rows[r][c] == '#') g.drawPixel(x + c, y + r, color);
+}
+
+// Draws text in one of the custom fonts (or only measures it when g is null).
+// Letter spacing: 1 px (small) / 2 px (big). Returns the width in pixels.
+static int customText(Adafruit_GFX* g, bool big, const char* s, int x, int y, uint16_t color) {
+  int cx = x, h = big ? BIG_H : SMALL_H, gap = big ? 2 : 1;
+  for (const char* p = s; *p; p++) {
+    const char* const* rows = big ? bigGlyph(*p) : smallGlyph(*p);
+    if (!rows) continue;
+    if (g) blit(*g, rows, h, cx, y, color);
+    cx += (int)strlen(rows[0]) + (p[1] ? gap : 0);
+  }
+  return cx - x;
+}
+static int textWidth(bool big, const char* s) { return customText(nullptr, big, s, 0, 0, 0); }
+
+// Filled circle of an exact pixel diameter (even or odd) inside the box
+// starting at (x0, y0) -- unlike fillCircle, it can be truly centred on an
+// even-sized area.
+static void fillDisc(Adafruit_GFX& g, int x0, int y0, int d, uint16_t color) {
+  float r = d / 2.0f, r2 = r * r + r * 0.6f;   // slight bulge = rounder looking edge pixels
+  for (int y = 0; y < d; y++)
+    for (int x = 0; x < d; x++) {
+      float dx = x + 0.5f - r, dy = y + 0.5f - r;
+      if (dx * dx + dy * dy <= r2) g.drawPixel(x0 + x, y0 + y, color);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Weekend layout: L train only, full screen
 //
-//   ( L )  MN
-//   ( L )  12 , 18        <- next train big, the one after small
+//    ████     Manhattan          <- label top lines up with the top of the bullet
+//   ██ L ██
+//   ██   ██   12 m  18m          <- big next train, small following train;
+//    ████                           baselines line up with the bottom of the bullet
 // ---------------------------------------------------------------------------
+static const uint16_t C_LABEL_SOFT = rgb565(200, 200, 205);
+static const uint16_t C_AMBER_DIM  = rgb565(190, 130, 35);
+
+static const char* directionName(const char* label) {
+  if (!strcmp(label, "MN")) return "Manhattan";
+  if (!strcmp(label, "BK")) return "Brooklyn";
+  return nullptr;
+}
+
 static void drawLOnly(Adafruit_GFX& g, const TransitData& t) {
-  // Big round L bullet
-  g.fillCircle(12, 16, 11, C_L_GREY);
-  printAt(g, 8, 10, 2, C_WHITE, "L");
+  // Geometry
+  const int DISC_X = 2, DISC_Y = 5, DISC_D = 22;          // bullet occupies rows 5..26
+  const int TOP = DISC_Y, BOTTOM = DISC_Y + DISC_D - 1;    // text aligns to these
+  const int TX = DISC_X + DISC_D + 3;                      // text column starts at x = 27
 
-  // Direction label
-  printAt(g, 26, 3, 1, C_LABEL, t.lLabel);
+  // Bullet: grey disc with a bold L, optically centred (nudged right 1 px
+  // because an L's weight sits on its left side).
+  fillDisc(g, DISC_X, DISC_Y, DISC_D, C_L_GREY);
+  const int lw = (int)strlen(BULLET_L[0]);
+  blit(g, BULLET_L, BULLET_L_H,
+       DISC_X + (DISC_D - lw) / 2 + 1, DISC_Y + (DISC_D - BULLET_L_H) / 2, C_WHITE);
 
-  const int x = 26, y = 13;   // big digits occupy rows 13..26
-  if (t.l1 < 0) {
-    printAt(g, x, y, 2, C_DIM, "--");
-    return;
-  }
-  int n1;
-  if (t.l1 == 0) { printAt(g, x, y, 2, C_AMBER, "AR"); n1 = 2; }
-  else { n1 = numChars(t.l1); printNumAt(g, x, y, 2, C_AMBER, t.l1); }
+  // Direction, cap height aligned with the top of the bullet
+  const char* name = directionName(t.lLabel);
+  if (name) customText(&g, false, name, TX, TOP, C_LABEL_SOFT);
+  else printAt(g, TX, TOP, 1, C_LABEL_SOFT, t.lLabel);
 
-  if (t.l2 >= 0) {
-    int x2 = x + n1 * 12 + 3;           // small second time, sitting on the same baseline
-    g.drawPixel(x2 - 2, y + 12, C_COMMA);
-    g.drawPixel(x2 - 3, y + 13, C_COMMA);
-    if (t.l2 == 0) printAt(g, x2, y + 7, 1, C_AMBER, "AR");
-    else printNumAt(g, x2, y + 7, 1, C_AMBER, t.l2);
+  // Times, bottoms aligned with the bottom of the bullet
+  const int bigY = BOTTOM - BIG_H + 1;     // big digits: rows 13..26
+  const int smallY = BOTTOM - 4;           // small text baseline (row 4 of glyph) on row 26
+
+  if (t.l1 < 0) { customText(&g, true, "--", TX, bigY, C_DIM); return; }
+
+  char a[12], b[12];
+  if (t.l1 == 0) snprintf(a, sizeof a, "AR"); else snprintf(a, sizeof a, "%d", t.l1);
+  bool firstUnit = t.l1 != 0;
+  bool hasSecond = t.l2 >= 0;
+  if (t.l2 == 0) snprintf(b, sizeof b, "AR"); else snprintf(b, sizeof b, "%d", t.l2);
+  bool secondIsAr = t.l2 == 0;
+
+  // Fit to 64 px: tighten the gap, then drop the second "m", then the second time.
+  const int unitW = textWidth(false, "m") + 1;
+  int w1 = textWidth(true, a) + (firstUnit ? unitW : 0);
+  int gap = 4;
+  bool secondUnit = !secondIsAr;
+  auto secondW = [&]() { return textWidth(false, b) + (secondUnit ? unitW : 0); };
+  if (hasSecond && TX + w1 + gap + secondW() > SCREEN_W) gap = 3;
+  if (hasSecond && TX + w1 + gap + secondW() > SCREEN_W) secondUnit = false;
+  if (hasSecond && TX + w1 + gap + secondW() > SCREEN_W) hasSecond = false;
+
+  int x = TX + customText(&g, true, a, TX, bigY, C_AMBER);
+  if (firstUnit) x += 1 + customText(&g, false, "m", x + 1, smallY, C_AMBER_DIM);
+
+  if (hasSecond) {
+    x += gap;
+    x += customText(&g, false, b, x, smallY, C_AMBER_DIM);
+    if (secondUnit) customText(&g, false, "m", x + 1, smallY, C_AMBER_DIM);
   }
 }
 
