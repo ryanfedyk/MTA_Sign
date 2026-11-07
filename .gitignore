@@ -16,3 +16,7 @@ firebase-debug.*.log
 # OS / editor
 .DS_Store
 __MACOSX/
+
+# Python
+__pycache__/
+*.pyc
