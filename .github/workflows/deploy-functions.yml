@@ -48,10 +48,12 @@ jobs:
         env:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
           MTA_BUS_KEY: ${{ secrets.MTA_BUS_KEY }}
+          SIGN_APP_PIN: ${{ secrets.SIGN_APP_PIN }}
         run: |
           missing=0
           [ -n "$GCP_SA_KEY" ]  || { echo "::error::Repository secret GCP_SA_KEY is not set (see README → One-time setup)"; missing=1; }
           [ -n "$MTA_BUS_KEY" ] || { echo "::error::Repository secret MTA_BUS_KEY is not set (see README → One-time setup)"; missing=1; }
+          [ -n "$SIGN_APP_PIN" ] || echo "::warning::Repository secret SIGN_APP_PIN is not set, so the control panel stays locked (see README → One-time setup)"
           exit $missing
 
       - name: Install function dependencies
@@ -61,7 +63,15 @@ jobs:
       - name: Write runtime config (functions/.env)
         env:
           MTA_BUS_KEY: ${{ secrets.MTA_BUS_KEY }}
-        run: printf 'MTA_BUS_KEY=%s\n' "$MTA_BUS_KEY" > functions/.env
+          SIGN_APP_PIN: ${{ secrets.SIGN_APP_PIN }}
+        # Values are written double-quoted and escaped so passphrases with spaces or symbols survive.
+        run: |
+          node -e '
+            const q = (v) => JSON.stringify(String(v || "").trim());
+            const lines = [`MTA_BUS_KEY=${q(process.env.MTA_BUS_KEY)}`];
+            if (process.env.SIGN_APP_PIN) lines.push(`SIGN_APP_PIN=${q(process.env.SIGN_APP_PIN)}`);
+            require("fs").writeFileSync("functions/.env", lines.join("\n") + "\n");
+          ' 
 
       - name: Authenticate to Google Cloud
         env:
@@ -73,12 +83,18 @@ jobs:
       - name: Deploy to Firebase
         run: npx --yes firebase-tools@15 deploy --only functions --project mta-transit-matrix --non-interactive --force
 
-      - name: Smoke-test the live endpoint
+      - name: Smoke-test the live endpoints
         run: |
           sleep 10
-          body=$(curl -fsS --retry 3 --retry-delay 5 https://us-central1-mta-transit-matrix.cloudfunctions.net/transit)
-          echo "Live response: $body"
+          BASE=https://us-central1-mta-transit-matrix.cloudfunctions.net
+          body=$(curl -fsS --retry 3 --retry-delay 5 "$BASE/transit")
+          echo "transit: $body"
           echo "$body" | node -e 'const b=JSON.parse(require("fs").readFileSync(0,"utf8")); if(!b.l||!b.b) process.exit(1)'
+          body=$(curl -fsS --retry 3 --retry-delay 5 "$BASE/sign")
+          echo "sign:    $body"
+          echo "$body" | node -e 'const b=JSON.parse(require("fs").readFileSync(0,"utf8")); if(!b.bd) process.exit(1)'
+          curl -fsS --retry 3 --retry-delay 5 "$BASE/app" | grep -q "Lorimer Sign"
+          echo "app:     OK  ->  $BASE/app"
 
       - name: Remove key file
         if: always()

@@ -1,0 +1,56 @@
+name: Build firmware
+
+# Compiles the ESP32 sketch for the Waveshare ESP32-S3 board on every change,
+# so a broken build is caught before anyone tries to flash the sign.
+# The compiled firmware is attached to each run as a downloadable artifact.
+on:
+  push:
+    paths: ["firmware/**", "tools/sim/**", ".github/workflows/firmware.yml"]
+  pull_request:
+    paths: ["firmware/**", "tools/sim/**", ".github/workflows/firmware.yml"]
+  workflow_dispatch:
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install arduino-cli
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core and libraries
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+          arduino-cli lib install "ArduinoJson" "Adafruit GFX Library" "ESP32 HUB75 LED MATRIX PANEL DMA Display"
+
+      - name: Use placeholder Wi-Fi secrets
+        run: cp firmware/mta_sign/secrets.example.h firmware/mta_sign/secrets.h
+
+      - name: Compile
+        run: |
+          arduino-cli compile --fqbn esp32:esp32:esp32s3 --warnings default \
+            --output-dir build firmware/mta_sign
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mta_sign-firmware
+          path: build/*.bin
+
+  preview:
+    # Renders GIF previews of every screen and animation using the real drawing code.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pillow
+      - run: tools/sim/build_previews.sh previews
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screen-previews
+          path: previews/

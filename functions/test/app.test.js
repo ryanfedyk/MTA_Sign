@@ -1,0 +1,76 @@
+// Web app API + the /sign endpoint, using an in-memory settings store.
+const test = require("node:test");
+const assert = require("node:assert");
+const { call } = require("./helpers");
+const settings = require("../lib/settings");
+const { setStore } = require("../lib/store");
+
+process.env.SIGN_APP_PIN = "purple cat 42";
+const { app, sign } = require("../index.js");
+const PIN = { "x-sign-pin": "purple cat 42" };
+
+test("serves the control panel page without a passphrase", async () => {
+  setStore(settings.memoryStore());
+  const { status, body, headers } = await call(app, { path: "/" });
+  assert.strictEqual(status, 200);
+  assert.match(headers["content-type"], /text\/html/);
+  assert.match(body, /Lorimer Sign/);
+});
+
+test("API refuses a wrong passphrase", async () => {
+  setStore(settings.memoryStore());
+  const { status } = await call(app, { path: "/api/settings", headers: { "x-sign-pin": "nope" } });
+  assert.strictEqual(status, 401);
+});
+
+test("brightness and idle settings round-trip and reach the sign", async () => {
+  const store = settings.memoryStore();
+  setStore(store);
+  let r = await call(app, { method: "POST", path: "/api/settings", headers: PIN,
+    body: { brightness: { day: 20 }, idle: { every: 60, style: "mix" } } });
+  assert.strictEqual(r.status, 200);
+  assert.deepStrictEqual(r.body.brightness, { day: 20, night: 5 });
+  assert.deepStrictEqual(r.body.idle, { every: 60, style: "mix" });
+
+  r = await call(sign);
+  assert.deepStrictEqual(r.body, { bd: 20, bn: 5, ie: 60, is: "mix" });
+});
+
+test("play + message commands get increasing ids the sign can pick up", async () => {
+  setStore(settings.memoryStore());
+  let r = await call(app, { method: "POST", path: "/api/play", headers: PIN, body: { name: "chase" } });
+  assert.deepStrictEqual(r.body, { ok: true, seq: 1 });
+  r = await call(app, { method: "POST", path: "/api/play", headers: PIN, body: { name: "peek" } });
+  assert.strictEqual(r.body.seq, 2);
+  r = await call(app, { method: "POST", path: "/api/message", headers: PIN, body: { text: "Dinner’s ready!", repeat: 3 } });
+  assert.deepStrictEqual(r.body, { ok: true, seq: 1, text: "Dinner's ready!" });
+
+  r = await call(sign);
+  assert.deepStrictEqual(r.body.a, { i: 2, n: "peek" });
+  assert.deepStrictEqual(r.body.m, { i: 1, t: "Dinner's ready!", r: 3 });
+});
+
+test("bad commands are rejected", async () => {
+  setStore(settings.memoryStore());
+  assert.strictEqual((await call(app, { method: "POST", path: "/api/play", headers: PIN, body: { name: "dog" } })).status, 400);
+  assert.strictEqual((await call(app, { method: "POST", path: "/api/message", headers: PIN, body: { text: "  🍝 " } })).status, 400);
+});
+
+test("works under the /app prefix used by cloudfunctions.net URLs", async () => {
+  setStore(settings.memoryStore());
+  // Cloud Functions strips the function name, but a trailing slash must not matter either
+  const r = await call(app, { path: "/api/settings/", headers: PIN });
+  assert.strictEqual(r.status, 200);
+});
+
+test("/sign falls back to defaults if the database is unavailable", async () => {
+  const broken = settings.memoryStore();
+  broken.get = async () => { throw new Error("database (default) does not exist"); };
+  setStore(broken);
+  const r = await call(sign);
+  assert.strictEqual(r.status, 200);
+  assert.deepStrictEqual(r.body, { bd: 12, bn: 5, ie: 30, is: "walk" });
+  // ...and the app explains the problem instead of crashing
+  const a = await call(app, { path: "/api/settings", headers: PIN });
+  assert.strictEqual(a.status, 503);
+});

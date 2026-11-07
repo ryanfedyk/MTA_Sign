@@ -25,6 +25,14 @@ gcloud services enable \
   cloudresourcemanager.googleapis.com iam.googleapis.com firebase.googleapis.com \
   serviceusage.googleapis.com --quiet
 
+echo "==> Making sure the settings database (Firestore) exists"
+gcloud services enable firestore.googleapis.com --quiet
+if gcloud firestore databases describe --database="(default)" >/dev/null 2>&1; then
+  echo "    already exists"
+else
+  gcloud firestore databases create --database="(default)" --location=nam5 --type=firestore-native --quiet
+fi
+
 echo "==> Creating service account $SA_EMAIL (if it doesn't exist)"
 gcloud iam service-accounts describe "$SA_EMAIL" >/dev/null 2>&1 || \
   gcloud iam service-accounts create "$SA_NAME" --display-name="GitHub Actions deployer"

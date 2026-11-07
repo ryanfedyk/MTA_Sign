@@ -1,7 +1,16 @@
 // MTA Transit RGB LED Matrix — Waveshare ESP32-S3-RGB-Matrix (64x32 HUB75)
-// Row 1: L Train (Lorimer St)   Row 2: B48 Bus
-// Amber = live GPS, White = scheduled. Data comes from the Firebase proxy
-// (see ../../functions) every 30 seconds.
+//
+// Weekdays: L train on top, B48 bus below.   Weekends: L train only, full screen.
+// Amber = live GPS, White = scheduled.
+// Every ~30 s a cat wanders across the screen. From the web app you can change
+// brightness, play an animation, or send a scrolling message.
+//
+// How it's organised:
+//   - A background task (core 0) talks to the cloud: arrivals every 30 s,
+//     sign settings/commands every 5 s, and keeps Wi-Fi alive.
+//   - loop() (core 1) only draws, ~30 frames per second, so animations stay
+//     smooth even while a network request is in progress.
+//   - All drawing code lives in display.cpp.
 //
 // Before flashing: copy secrets.example.h to secrets.h and fill in Wi-Fi.
 
@@ -13,10 +22,23 @@
 #include <time.h>
 
 #include "secrets.h"
+#include "display.h"
 
-const char* ssid      = WIFI_SSID;
-const char* password  = WIFI_PASSWORD;
-const char* proxy_url = "https://us-central1-mta-transit-matrix.cloudfunctions.net/transit";
+// ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+static const char* TRANSIT_URL = "https://us-central1-mta-transit-matrix.cloudfunctions.net/transit";
+static const char* SIGN_URL    = "https://us-central1-mta-transit-matrix.cloudfunctions.net/sign";
+
+static const uint32_t TRANSIT_EVERY_MS = 30000;
+static const uint32_t SIGN_EVERY_MS    = 5000;
+static const uint32_t FRAME_MS         = 33;              // ~30 fps
+static const uint32_t WIFI_GIVE_UP_MS  = 5UL * 60 * 1000; // reboot after 5 min offline
+
+// Defaults until the cloud says otherwise (a little dimmer than before: was 16 / 6).
+static const uint8_t DEFAULT_DAY_BRIGHTNESS   = 12;
+static const uint8_t DEFAULT_NIGHT_BRIGHTNESS = 5;
+static const int NIGHT_STARTS = 22, NIGHT_ENDS = 7;       // local hours
 
 #define PANEL_RES_X 64
 #define PANEL_RES_Y 32
@@ -37,134 +59,158 @@ const char* proxy_url = "https://us-central1-mta-transit-matrix.cloudfunctions.n
 #define OE_PIN  2
 #define CLK_PIN 41
 
-MatrixPanel_I2S_DMA *dma_display = nullptr;
+// ---------------------------------------------------------------------------
+// Shared state (written by the network task, read by the drawing loop)
+// ---------------------------------------------------------------------------
+static const int MAX_MSG = 80;
 
-unsigned long lastFetch = 0;
-const unsigned long fetchInterval = 30000;
+struct SignSettings {
+  uint8_t dayBright = DEFAULT_DAY_BRIGHTNESS;
+  uint8_t nightBright = DEFAULT_NIGHT_BRIGHTNESS;
+  uint16_t idleSec = 30;           // 0 = no idle animation
+  char idleAnim[12] = "walk";      // "walk" | "chase" | "peek" | "mix"
+  uint32_t animId = 0;             // changes each time the app presses "Play"
+  char animName[12] = "";
+  uint32_t msgId = 0;              // changes each time the app sends a message
+  char msgText[MAX_MSG + 1] = "";
+  uint8_t msgRepeat = 2;
+};
 
-String l_label   = "MN";
-int l_min1       = -1;
-int l_min2       = -1;
+static TransitData gTransit;
+static SignSettings gSettings;
+static SemaphoreHandle_t gLock;
 
-String b48_label = "SB";
-int b48_min1     = -1;
-int b48_min2     = -1;
-bool b48_live1   = true;
-bool b48_live2   = true;
+MatrixPanel_I2S_DMA* dma_display = nullptr;
 
-void updateBrightness() {
-  struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) return;
-
-  int hour = timeinfo.tm_hour;
-  if (hour >= 22 || hour < 7) {
-    dma_display->setBrightness8(6);
-  } else {
-    dma_display->setBrightness8(16);
-  }
+static void copyStr(char* dst, size_t n, const char* src) {
+  strncpy(dst, src ? src : "", n - 1);
+  dst[n - 1] = 0;
 }
 
-void drawDualTimes(int yPos, int t1, int t2, bool isLive1, bool isLive2) {
-  if (t1 < 0) {
-    dma_display->setTextColor(dma_display->color565(140, 140, 145));
-    dma_display->setCursor(44, yPos);
-    dma_display->print("--");
-    return;
-  }
-
-  // Lead arrival: Live GPS = Amber (255, 180, 50) | Scheduled = Pure White (255, 255, 255)
-  uint16_t color1 = isLive1 ? dma_display->color565(255, 180, 50) : dma_display->color565(255, 255, 255);
-  dma_display->setTextColor(color1);
-
-  if (t1 == 0) {
-    dma_display->setCursor(32, yPos);
-    dma_display->print("AR");
-  } else {
-    dma_display->setCursor(t1 < 10 ? 37 : 31, yPos);
-    dma_display->print(t1);
-  }
-
-  // Follower arrival
-  if (t2 >= 0) {
-    uint16_t commaColor = dma_display->color565(130, 130, 135);
-    dma_display->drawPixel(46, yPos + 5, commaColor);
-    dma_display->drawPixel(45, yPos + 6, commaColor);
-
-    uint16_t color2 = isLive2 ? dma_display->color565(255, 180, 50) : dma_display->color565(255, 255, 255);
-    dma_display->setTextColor(color2);
-
-    if (t2 == 0) {
-      dma_display->setCursor(50, yPos);
-      dma_display->print("AR");
-    } else {
-      dma_display->setCursor(t2 < 10 ? 55 : 49, yPos);
-      dma_display->print(t2);
-    }
-  }
-}
-
-void drawTransitScreen() {
-  dma_display->fillScreen(dma_display->color565(0, 0, 0));
-
-  // Top Row: L Train
-  dma_display->fillRoundRect(2, 2, 11, 11, 3, dma_display->color565(85, 90, 95));
-  dma_display->setTextColor(dma_display->color565(255, 255, 255));
-  dma_display->setCursor(5, 4);
-  dma_display->print("L");
-
-  dma_display->setTextColor(dma_display->color565(180, 180, 180));
-  dma_display->setCursor(16, 4);
-  dma_display->print(l_label);
-
-  drawDualTimes(4, l_min1, l_min2, true, true);
-
-  dma_display->drawFastHLine(2, 15, 60, dma_display->color565(35, 35, 40));
-
-  // Bottom Row: B48 Bus
-  dma_display->fillRoundRect(2, 18, 11, 11, 3, dma_display->color565(0, 55, 165));
-  dma_display->setTextColor(dma_display->color565(255, 255, 255));
-  dma_display->setCursor(5, 20);
-  dma_display->print("B");
-
-  dma_display->setTextColor(dma_display->color565(180, 180, 180));
-  dma_display->setCursor(16, 20);
-  dma_display->print(b48_label);
-
-  drawDualTimes(20, b48_min1, b48_min2, b48_live1, b48_live2);
-}
-
-void fetchTransitData() {
-  if (WiFi.status() != WL_CONNECTED) return;
-
+// ---------------------------------------------------------------------------
+// Network task
+// ---------------------------------------------------------------------------
+static bool httpGetJson(const char* url, JsonDocument& doc) {
   WiFiClientSecure client;
   client.setInsecure();
-
   HTTPClient https;
-  if (https.begin(client, proxy_url)) {
-    int httpCode = https.GET();
-    if (httpCode == HTTP_CODE_OK) {
-      String payload = https.getString();
-      StaticJsonDocument<512> doc;
-      DeserializationError err = deserializeJson(doc, payload);
+  https.setTimeout(8000);
+  if (!https.begin(client, url)) return false;
+  bool ok = false;
+  int code = https.GET();
+  if (code == HTTP_CODE_OK) {
+    String payload = https.getString();
+    ok = !deserializeJson(doc, payload);
+  } else {
+    Serial.printf("GET %s -> %d\n", url, code);
+  }
+  https.end();
+  return ok;
+}
 
-      if (!err) {
-        l_label   = doc["l"]["dir"].as<const char*>();
-        l_min1    = doc["l"]["t1"];
-        l_min2    = doc["l"]["t2"];
+static void fetchTransit() {
+  JsonDocument doc;
+  if (!httpGetJson(TRANSIT_URL, doc)) return;
 
-        b48_label = doc["b"]["dir"].as<const char*>();
-        b48_min1  = doc["b"]["t1"];
-        b48_live1 = doc["b"]["live1"];
-        b48_min2  = doc["b"]["t2"];
-        b48_live2 = doc["b"]["live2"];
-      }
+  TransitData t;
+  t.valid = true;
+  t.lOnly = strcmp(doc["lay"] | "LB", "L") == 0;
+  copyStr(t.lLabel, sizeof t.lLabel, doc["l"]["dir"] | "MN");
+  t.l1 = doc["l"]["t1"] | -1;
+  t.l2 = doc["l"]["t2"] | -1;
+  copyStr(t.bLabel, sizeof t.bLabel, doc["b"]["dir"] | "");
+  t.b1 = doc["b"]["t1"] | -1;
+  t.b2 = doc["b"]["t2"] | -1;
+  t.bLive1 = doc["b"]["live1"] | true;
+  t.bLive2 = doc["b"]["live2"] | true;
+
+  xSemaphoreTake(gLock, portMAX_DELAY);
+  gTransit = t;
+  xSemaphoreGive(gLock);
+}
+
+static void fetchSign() {
+  JsonDocument doc;
+  if (!httpGetJson(SIGN_URL, doc)) return;
+
+  SignSettings s;
+  s.dayBright   = doc["bd"] | DEFAULT_DAY_BRIGHTNESS;
+  s.nightBright = doc["bn"] | DEFAULT_NIGHT_BRIGHTNESS;
+  s.idleSec     = doc["ie"] | 30;
+  copyStr(s.idleAnim, sizeof s.idleAnim, doc["is"] | "walk");
+  if (doc["a"].is<JsonObject>()) {
+    s.animId = doc["a"]["i"] | 0;
+    copyStr(s.animName, sizeof s.animName, doc["a"]["n"] | "");
+  }
+  if (doc["m"].is<JsonObject>()) {
+    s.msgId = doc["m"]["i"] | 0;
+    copyStr(s.msgText, sizeof s.msgText, doc["m"]["t"] | "");
+    s.msgRepeat = doc["m"]["r"] | 2;
+  }
+
+  xSemaphoreTake(gLock, portMAX_DELAY);
+  gSettings = s;
+  xSemaphoreGive(gLock);
+}
+
+static void netTask(void*) {
+  uint32_t lastTransit = 0, lastSign = 0, offlineSince = 0, lastReconnect = 0;
+  bool first = true;
+  for (;;) {
+    uint32_t now = millis();
+    if (WiFi.status() != WL_CONNECTED) {
+      // Wi-Fi watchdog: retry every 10 s, reboot if it's been down for 5 minutes.
+      if (!offlineSince) offlineSince = now;
+      if (now - lastReconnect > 10000) { WiFi.reconnect(); lastReconnect = now; }
+      if (now - offlineSince > WIFI_GIVE_UP_MS) ESP.restart();
+      vTaskDelay(pdMS_TO_TICKS(500));
+      continue;
     }
-    https.end();
+    offlineSince = 0;
+
+    if (first || now - lastTransit >= TRANSIT_EVERY_MS) { lastTransit = now; fetchTransit(); }
+    if (first || now - lastSign >= SIGN_EVERY_MS)       { lastSign = now;    fetchSign(); }
+    first = false;
+    vTaskDelay(pdMS_TO_TICKS(250));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Drawing loop
+// ---------------------------------------------------------------------------
+enum Mode { MODE_TRANSIT, MODE_ANIM, MODE_MESSAGE };
+static Mode mode = MODE_TRANSIT;
+static AnimKind currentAnim = ANIM_NONE;
+static uint32_t modeStart = 0, nextIdleAt = 0, seenAnimId = 0, seenMsgId = 0;
+static char currentMsg[MAX_MSG + 1] = "";
+static uint8_t currentRepeat = 2;
+static uint8_t appliedBrightness = 0;
+
+static void scheduleIdle(const SignSettings& s, uint32_t now) {
+  // every `idleSec` seconds, give or take a few, so it feels less mechanical
+  nextIdleAt = now + s.idleSec * 1000UL + random(-4000, 4000);
+}
+
+static AnimKind pickIdle(const SignSettings& s) {
+  if (!strcmp(s.idleAnim, "mix")) return (AnimKind)random(ANIM_WALK, ANIM_COUNT);
+  AnimKind k = animFromName(s.idleAnim);
+  return k == ANIM_NONE ? ANIM_WALK : k;
+}
+
+static void updateBrightness(const SignSettings& s) {
+  struct tm ti;
+  bool night = false;
+  if (getLocalTime(&ti, 5)) night = ti.tm_hour >= NIGHT_STARTS || ti.tm_hour < NIGHT_ENDS;
+  uint8_t b = night ? s.nightBright : s.dayBright;
+  if (b != appliedBrightness) {
+    dma_display->setBrightness8(b);
+    appliedBrightness = b;
   }
 }
 
 void setup() {
   Serial.begin(115200);
+  gLock = xSemaphoreCreateMutex();
 
   HUB75_I2S_CFG mxconfig(PANEL_RES_X, PANEL_RES_Y, PANEL_CHAIN);
   mxconfig.gpio.r1 = R1_PIN; mxconfig.gpio.g1 = G1_PIN; mxconfig.gpio.b1 = B1_PIN;
@@ -176,40 +222,77 @@ void setup() {
   mxconfig.clkphase = false;
   mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_10M;
   mxconfig.min_refresh_rate = 60;
+  mxconfig.double_buff = true;      // draw off-screen, then flip: no flicker during animations
 
   dma_display = new MatrixPanel_I2S_DMA(mxconfig);
   dma_display->begin();
-  dma_display->setBrightness8(16);
-  dma_display->clearScreen();
+  dma_display->setBrightness8(DEFAULT_DAY_BRIGHTNESS);
+  appliedBrightness = DEFAULT_DAY_BRIGHTNESS;
 
-  dma_display->setTextColor(dma_display->color565(200, 200, 200));
-  dma_display->setCursor(2, 12);
-  dma_display->print("CONNECTING");
-
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-  }
-
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   configTzTime("EST5EDT,M3.2.0,M11.1.0", "pool.ntp.org", "time.nist.gov");
-  struct tm timeinfo;
-  int retry = 0;
-  while (!getLocalTime(&timeinfo) && retry < 10) {
-    delay(300);
-    retry++;
-  }
 
-  updateBrightness();
-  fetchTransitData();
-  drawTransitScreen();
-  lastFetch = millis();
+  randomSeed(esp_random());
+  xTaskCreatePinnedToCore(netTask, "net", 16384, nullptr, 1, nullptr, 0);
+  scheduleIdle(gSettings, millis());
 }
 
 void loop() {
-  if (millis() - lastFetch >= fetchInterval) {
-    lastFetch = millis();
-    updateBrightness();
-    fetchTransitData();
-    drawTransitScreen();
+  static uint32_t lastFrame = 0, lastBrightness = 0;
+  uint32_t now = millis();
+  if (now - lastFrame < FRAME_MS) { delay(1); return; }
+  lastFrame = now;
+
+  TransitData t;
+  SignSettings s;
+  xSemaphoreTake(gLock, portMAX_DELAY);
+  t = gTransit;
+  s = gSettings;
+  xSemaphoreGive(gLock);
+
+  if (now - lastBrightness > 1000) { lastBrightness = now; updateBrightness(s); }
+
+  // New commands from the web app
+  if (s.msgId && s.msgId != seenMsgId) {
+    seenMsgId = s.msgId;
+    copyStr(currentMsg, sizeof currentMsg, s.msgText);
+    currentRepeat = s.msgRepeat;
+    if (currentMsg[0]) { mode = MODE_MESSAGE; modeStart = now; }
   }
+  if (s.animId && s.animId != seenAnimId) {
+    seenAnimId = s.animId;
+    AnimKind k = animFromName(s.animName);
+    if (k != ANIM_NONE && mode != MODE_MESSAGE) { mode = MODE_ANIM; currentAnim = k; modeStart = now; }
+  }
+
+  // Idle cat
+  if (mode == MODE_TRANSIT && t.valid && s.idleSec > 0) {
+    if ((int32_t)(now - nextIdleAt) >= 0) {
+      mode = MODE_ANIM; currentAnim = pickIdle(s); modeStart = now;
+    } else if ((int32_t)(nextIdleAt - now) > (int32_t)(s.idleSec * 1000UL + 5000)) {
+      scheduleIdle(s, now);   // interval was shortened in the app
+    }
+  }
+
+  // Draw one frame
+  if (mode == MODE_MESSAGE) {
+    if (!drawMessage(*dma_display, currentMsg, currentRepeat, now - modeStart)) {
+      mode = MODE_TRANSIT;
+      scheduleIdle(s, now);
+    }
+  }
+  if (mode != MODE_MESSAGE) {
+    if (!t.valid) {
+      drawConnecting(*dma_display, now);
+    } else {
+      drawTransit(*dma_display, t);
+      if (mode == MODE_ANIM && !drawAnim(*dma_display, currentAnim, now - modeStart)) {
+        mode = MODE_TRANSIT;
+        scheduleIdle(s, now);
+      }
+    }
+  }
+  dma_display->flipDMABuffer();
 }

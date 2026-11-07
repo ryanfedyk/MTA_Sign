@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16120f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Sign">
+<title>Lorimer Sign</title>
+<style>
+  :root {
+    --bg: #16120f; --card: #211b17; --card2: #2a231e; --line: #3a312a;
+    --text: #f4ece4; --muted: #a8998b; --amber: #ffb432; --orange: #ff7d0f;
+    --blue: #0037a5; --lgrey: #555a5f; --good: #6fdc8c; --bad: #ff6b6b;
+    --r: 18px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 520px; margin: 0 auto; padding: calc(16px + env(safe-area-inset-top)) 16px 48px; }
+  header { display: flex; align-items: center; justify-content: space-between; margin: 4px 2px 16px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -.01em; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+  .pill { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px;
+    background: var(--card); border: 1px solid var(--line); padding: 6px 10px; border-radius: 99px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.on { background: var(--good); box-shadow: 0 0 8px var(--good); }
+  .dot.off { background: var(--bad); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; margin-bottom: 14px; }
+
+  /* mini LED preview */
+  .led { background: #0b0908; border-radius: 12px; padding: 14px 16px; font: 600 19px/1 ui-monospace, "SF Mono", Menlo, monospace;
+    border: 1px solid #000; box-shadow: inset 0 0 24px rgba(0,0,0,.8); min-height: 92px; display: flex; flex-direction: column; justify-content: center; gap: 10px; }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .badge { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; color: #fff; font-size: 16px; flex: none; }
+  .badge.l { background: var(--lgrey); border-radius: 50%; } .badge.b { background: var(--blue); }
+  .dir { color: #b4b4b4; width: 34px; }
+  .times { margin-left: auto; letter-spacing: .02em; }
+  .live { color: var(--amber); } .sched { color: #fff; } .none { color: #8c8c91; }
+  .led.big .badge { width: 52px; height: 52px; font-size: 32px; }
+  .led.big .times { margin-left: 8px; font-size: 38px; }
+  .led.big .times small { font-size: 18px; }
+  .led.big .dir { position: absolute; }
+  .legend { margin-top: 10px; font-size: 12px; color: var(--muted); display: flex; gap: 14px; }
+  .legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+  .legend .a::before { background: var(--amber); } .legend .w::before { background: #fff; }
+
+  /* inputs */
+  textarea { width: 100%; resize: none; background: var(--card2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 12px; padding: 12px 14px; font: inherit; font-size: 18px; min-height: 64px; outline: none; }
+  textarea:focus { border-color: var(--orange); }
+  .meta { display: flex; justify-content: space-between; align-items: center; margin: 8px 2px 12px; font-size: 13px; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .chip { background: var(--card2); border: 1px solid var(--line); color: var(--text); border-radius: 99px; padding: 7px 12px; font-size: 14px; cursor: pointer; }
+  .seg { display: flex; background: var(--card2); border: 1px solid var(--line); border-radius: 12px; padding: 3px; gap: 3px; }
+  .seg button { flex: 1; background: none; border: 0; color: var(--muted); padding: 9px 4px; border-radius: 9px; font: inherit; font-size: 14px; cursor: pointer; }
+  .seg button.sel { background: var(--text); color: var(--bg); font-weight: 600; }
+  .seg.disabled { opacity: .4; pointer-events: none; }
+  .btn { width: 100%; border: 0; border-radius: 14px; padding: 14px; font: inherit; font-weight: 650; font-size: 17px;
+    background: var(--orange); color: #1b0e03; cursor: pointer; margin-top: 12px; }
+  .btn:disabled { opacity: .5; }
+  .btn.ghost { background: var(--card2); color: var(--text); border: 1px solid var(--line); }
+  label.field { display: block; font-size: 14px; color: var(--muted); margin: 14px 2px 8px; }
+  .between { display: flex; justify-content: space-between; align-items: center; }
+
+  /* cats */
+  .cats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .cat { background: #0b0908; border: 1px solid var(--line); border-radius: 14px; padding: 10px 6px 10px; text-align: center; cursor: pointer; color: var(--text); font: inherit; }
+  .cat canvas { width: 100%; height: auto; image-rendering: pixelated; display: block; margin-bottom: 8px; }
+  .cat span { font-size: 13px; }
+  .cat:active { transform: scale(.97); }
+
+  /* toggle */
+  .switch { position: relative; width: 50px; height: 30px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch i { position: absolute; inset: 0; background: var(--card2); border: 1px solid var(--line); border-radius: 99px; transition: .2s; }
+  .switch i::after { content: ""; position: absolute; width: 24px; height: 24px; top: 2px; left: 2px; background: var(--muted); border-radius: 50%; transition: .2s; }
+  .switch input:checked + i { background: var(--orange); border-color: var(--orange); }
+  .switch input:checked + i::after { transform: translateX(20px); background: #fff; }
+
+  /* sliders */
+  input[type=range] { width: 100%; accent-color: var(--orange); height: 28px; }
+  .val { font-variant-numeric: tabular-nums; color: var(--text); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+  /* gate + toast */
+  #gate { min-height: 70vh; display: flex; flex-direction: column; justify-content: center; }
+  #gate input { width: 100%; background: var(--card2); border: 1px solid var(--line); color: var(--text); border-radius: 12px; padding: 14px; font: inherit; font-size: 18px; outline: none; }
+  .err { color: var(--bad); font-size: 14px; min-height: 20px; margin-top: 8px; }
+  .banner { background: #3a1d1d; border: 1px solid #6b2b2b; color: #ffd6d6; padding: 12px 14px; border-radius: 12px; font-size: 14px; margin-bottom: 14px; }
+  #toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translate(-50%, 30px); opacity: 0;
+    background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 99px; font-weight: 600; font-size: 15px; transition: .25s; pointer-events: none; white-space: nowrap; }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .hidden { display: none !important; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 18px; }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <section id="gate" class="hidden">
+    <h1 style="margin-bottom:6px">Lorimer Sign</h1>
+    <p style="color:var(--muted);margin:0 0 20px">Enter the passphrase to control the sign. This device will remember it.</p>
+    <form id="gateForm">
+      <input id="pin" type="password" autocomplete="current-password" placeholder="Passphrase" autofocus>
+      <button class="btn" type="submit">Unlock</button>
+      <div class="err" id="gateErr"></div>
+    </form>
+  </section>
+
+  <div id="ui" class="hidden">
+    <header>
+      <h1>Lorimer Sign</h1>
+      <div class="pill"><span class="dot" id="dot"></span><span id="status">Checking…</span></div>
+    </header>
+
+    <div id="banner" class="banner hidden"></div>
+
+    <section class="card">
+      <h2>On the sign now</h2>
+      <div class="led" id="led"><div class="row none">Loading…</div></div>
+      <div class="legend"><span class="a">Live GPS</span><span class="w">Scheduled</span></div>
+    </section>
+
+    <section class="card">
+      <h2>Leave a message</h2>
+      <textarea id="msg" maxlength="80" rows="2" placeholder="Type something for the sign…"></textarea>
+      <div class="meta"><span>Scrolls across the whole sign</span><span id="count">0 / 80</span></div>
+      <div class="chips" id="chips"></div>
+      <div class="between"><span style="font-size:14px;color:var(--muted)">Times to scroll</span></div>
+      <div class="seg" id="repeat" style="margin-top:8px">
+        <button data-v="1">Once</button><button data-v="2" class="sel">Twice</button><button data-v="3">3×</button><button data-v="5">5×</button>
+      </div>
+      <button class="btn" id="send">Send to sign</button>
+    </section>
+
+    <section class="card">
+      <h2>Play a cat</h2>
+      <div class="cats" id="cats"></div>
+    </section>
+
+    <section class="card">
+      <h2>Idle cat</h2>
+      <div class="between">
+        <div><div style="font-weight:600">Cat wanders by</div><div class="hint" style="margin:2px 0 0">Plays on its own between arrivals</div></div>
+        <label class="switch"><input type="checkbox" id="idleOn"><i></i></label>
+      </div>
+      <label class="field">How often</label>
+      <div class="seg" id="every">
+        <button data-v="15">15 s</button><button data-v="30">30 s</button><button data-v="60">1 min</button><button data-v="300">5 min</button>
+      </div>
+      <label class="field">Which cat</label>
+      <div class="seg" id="style">
+        <button data-v="walk">Stroll</button><button data-v="chase">Yarn</button><button data-v="peek">Peek</button><button data-v="mix">Mix</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Brightness</h2>
+      <div class="between"><span>Daytime</span><span class="val" id="dayVal"></span></div>
+      <input type="range" id="day" min="1" max="64" step="1">
+      <div class="between" style="margin-top:10px"><span>Night <span style="color:var(--muted);font-size:13px">(10 PM – 7 AM)</span></span><span class="val" id="nightVal"></span></div>
+      <input type="range" id="night" min="1" max="64" step="1">
+      <div class="hint">Changes reach the sign within a few seconds.</div>
+    </section>
+
+    <footer><a href="#" id="lock">Forget passphrase on this device</a></footer>
+  </div>
+</main>
+<div id="toast"></div>
+
+<script>
+// ---- Sprites: same pixel art as firmware/mta_sign/display.cpp ----
+const PALETTE = { o: "#ff7d0f", d: "#a53700", w: "#ffe1af", p: "#ff698c", e: "#78ff50", g: "#78787d", b: "#4664ff", B: "#aabeff", k: "#000" };
+const SPRITES = {
+  walk: [[
+    ".o........o....o","o.........oo..oo","o.........oooooo","o.........oeooeo",".ooodoodooowppwo","..oodoodoooowwo.",
+    "..oodoodoooo....","..oooooooooo....","..owwwwwwwoo....","..o..o...o..o...",".o...o..o....o.."],[
+    "o.........o....o","o.........oo..oo","o.........oooooo",".o........oeooeo",".ooodoodooowppwo","..oodoodoooowwo.",
+    "..oodoodoooo....","..oooooooooo....","..owwwwwwwoo....","...o.o....o.o...","...o.o....o.o..."],[
+    ".o........o....o","o.........oo..oo","o.........oooooo","o.........oeooeo",".ooodoodooowppwo","..oodoodoooowwo.",
+    "..oodoodoooo....","..oooooooooo....","..owwwwwwwoo....","...oo.....oo....","...oo.....oo...."]],
+  chase: [[
+    "................","..........o...o.","oo........oo.oo.","..o.......ooooo.","...ooodoodoeooeo","...oodoodoowppwo",
+    "..oodoodoooowwo.","..ooooooooooo...",".owwwwwwwwwo....","oo.........oo...","o............o.."],[
+    "................","..........o...o.","..........oo.oo.","ooo.......ooooo.","...ooodoodoeooeo","...oodoodoowppwo",
+    "...odoodoooowwo.","...oooooooooo...","....owwwwwwo....","....oo..oo......","....o....o......"]],
+  peek: [[
+    "..o............o..","..oo..........oo..","..opo........opo..","..oppo......oppo..","..oooooooooooooo..",
+    ".oooodoodoodooooo.",".oooooooooooooooo.",".oooeeooooooeeooo.",".oooekooooookeooo.","gooooooowpwoooooog",
+    ".gooooowwpwwoooog.","goooooowwwwoooooog",".oooooooooooooooo.","..oooooooooooooo..","...oooooooooooo..."],[
+    "..o............o..","..oo..........oo..","..opo........opo..","..oppo......oppo..","..oooooooooooooo..",
+    ".oooodoodoodooooo.",".oooooooooooooooo.",".oooooooooooooooo.",".oookkooooookkooo.","gooooooowpwoooooog",
+    ".gooooowwpwwoooog.","goooooowwwwoooooog",".oooooooooooooooo.","..oooooooooooooo..","...oooooooooooo..."]],
+};
+const YARN = [".bbbb.","bBbbBb","bbBBbb","bbBBbb","bBbbBb",".bbbb."];
+
+function drawSprite(ctx, rows, x, y) {
+  rows.forEach((row, r) => [...row].forEach((ch, c) => {
+    if (ch === ".") return;
+    ctx.fillStyle = PALETTE[ch]; ctx.fillRect(x + c, y + r, 1, 1);
+  }));
+}
+
+// ---- API ----
+const BASE = location.pathname.replace(/\/+$/, "");
+const TRANSIT_URL = "https://us-central1-mta-transit-matrix.cloudfunctions.net/transit";
+let PIN = localStorage.getItem("signPin") || "";
+
+async function api(path, body) {
+  const res = await fetch(BASE + "/api/" + path, {
+    method: body ? "POST" : "GET",
+    headers: { "x-sign-pin": PIN, ...(body ? { "content-type": "application/json" } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { showGate("That passphrase didn't work."); throw new Error("locked"); }
+  if (!res.ok) throw new Error(data.error || "Something went wrong");
+  return data;
+}
+
+const $ = (id) => document.getElementById(id);
+function toast(text) {
+  const t = $("toast"); t.textContent = text; t.classList.add("show");
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2200);
+}
+function banner(text) { const b = $("banner"); b.textContent = text || ""; b.classList.toggle("hidden", !text); }
+
+// ---- gate ----
+function showGate(err) {
+  $("ui").classList.add("hidden"); $("gate").classList.remove("hidden");
+  $("gateErr").textContent = err || ""; $("pin").value = ""; $("pin").focus();
+}
+$("gateForm").onsubmit = async (e) => {
+  e.preventDefault();
+  PIN = $("pin").value.trim(); if (!PIN) return;
+  try { await load(); localStorage.setItem("signPin", PIN); } catch (err) { if (err.message !== "locked") $("gateErr").textContent = err.message; }
+};
+$("lock").onclick = (e) => { e.preventDefault(); localStorage.removeItem("signPin"); PIN = ""; showGate(); };
+
+// ---- settings ----
+let S = null;
+function seg(id, value) { $(id).querySelectorAll("button").forEach((b) => b.classList.toggle("sel", b.dataset.v === String(value))); }
+
+function render() {
+  $("day").value = S.brightness.day; $("dayVal").textContent = S.brightness.day;
+  $("night").value = S.brightness.night; $("nightVal").textContent = S.brightness.night;
+  const on = S.idle.every > 0;
+  $("idleOn").checked = on;
+  seg("every", on ? S.idle.every : -1); seg("style", S.idle.style);
+  $("every").classList.toggle("disabled", !on); $("style").classList.toggle("disabled", !on);
+  const ago = S.lastSeenSecondsAgo;
+  const online = ago !== null && ago < 180;
+  $("dot").className = "dot " + (ago === null ? "" : online ? "on" : "off");
+  $("status").textContent = ago === null ? "Never seen" : online ? "Online" : "Offline · " + fmtAgo(ago);
+}
+function fmtAgo(s) { return s < 3600 ? Math.round(s / 60) + " min ago" : s < 86400 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " d ago"; }
+
+async function load() {
+  S = await api("settings");
+  $("gate").classList.add("hidden"); $("ui").classList.remove("hidden");
+  banner(""); render();
+}
+
+let saveTimer;
+function save(patch, msg) {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    try { S = await api("settings", patch); render(); toast(msg || "Saved"); }
+    catch (e) { if (e.message !== "locked") banner(e.message); }
+  }, 250);
+}
+
+["day", "night"].forEach((k) => {
+  $(k).oninput = () => { $(k + "Val").textContent = $(k).value; };
+  $(k).onchange = () => save({ brightness: { [k]: Number($(k).value) } }, "Brightness saved");
+});
+$("idleOn").onchange = () => {
+  const on = $("idleOn").checked;
+  save({ idle: { every: on ? (S.idle.every || 30) : 0 } }, on ? "Idle cat on" : "Idle cat off");
+};
+$("every").onclick = (e) => { const v = e.target.dataset.v; if (v) { seg("every", v); save({ idle: { every: Number(v) } }); } };
+$("style").onclick = (e) => { const v = e.target.dataset.v; if (v) { seg("style", v); save({ idle: { style: v } }); } };
+
+// ---- message ----
+const QUICK = ["Dinner's ready!", "Have a great day!", "Love you!", "Back soon"];
+QUICK.forEach((q) => {
+  const c = document.createElement("button"); c.className = "chip"; c.textContent = q;
+  c.onclick = () => { $("msg").value = q; $("msg").oninput(); };
+  $("chips").appendChild(c);
+});
+let repeat = 2;
+$("repeat").onclick = (e) => { const v = e.target.dataset.v; if (v) { repeat = Number(v); seg("repeat", v); } };
+$("msg").oninput = () => { $("count").textContent = $("msg").value.length + " / 80"; };
+$("send").onclick = async () => {
+  const text = $("msg").value.trim();
+  if (!text) { $("msg").focus(); return; }
+  $("send").disabled = true;
+  try { await api("message", { text, repeat }); toast("Sent — watch the sign"); $("msg").value = ""; $("msg").oninput(); }
+  catch (e) { if (e.message !== "locked") toast(e.message); }
+  finally { $("send").disabled = false; }
+};
+
+// ---- cats ----
+const CAT_LABELS = { walk: "Stroll", chase: "Yarn chase", peek: "Peek-a-boo" };
+Object.keys(CAT_LABELS).forEach((id) => {
+  const btn = document.createElement("button"); btn.className = "cat";
+  const cv = document.createElement("canvas"); cv.width = 24; cv.height = 18;
+  btn.appendChild(cv);
+  const s = document.createElement("span"); s.textContent = CAT_LABELS[id]; btn.appendChild(s);
+  const ctx = cv.getContext("2d");
+  let f = 0;
+  const paint = () => {
+    ctx.clearRect(0, 0, 24, 18);
+    const frames = SPRITES[id];
+    if (id === "peek") drawSprite(ctx, frames[f % 12 === 0 ? 1 : 0], 3, 3);
+    else if (id === "chase") { drawSprite(ctx, frames[f % 2], 0, 6); drawSprite(ctx, YARN, 18, 11); }
+    else drawSprite(ctx, frames[f % frames.length], 4, 6);
+    f++;
+  };
+  paint(); setInterval(paint, id === "peek" ? 150 : 220);
+  btn.onclick = async () => {
+    try { await api("play", { name: id }); toast(CAT_LABELS[id] + " — coming right up"); }
+    catch (e) { if (e.message !== "locked") toast(e.message); }
+  };
+  $("cats").appendChild(btn);
+});
+
+// ---- live preview of the sign ----
+function timesHtml(t1, t2, live1, live2) {
+  const cls = (live) => (live ? "live" : "sched");
+  const fmt = (t) => (t === 0 ? "AR" : t);
+  if (t1 < 0) return '<span class="none">--</span>';
+  let h = `<span class="${cls(live1)}">${fmt(t1)}</span>`;
+  if (t2 >= 0) h += `<span class="none">, </span><span class="${cls(live2)}">${fmt(t2)}</span>`;
+  return h;
+}
+async function refreshPreview() {
+  try {
+    const d = await (await fetch(TRANSIT_URL)).json();
+    const led = $("led");
+    if (d.lay === "L") {
+      led.className = "led big";
+      led.innerHTML = `<div class="row"><div class="badge l">L</div><div><div class="dir" style="position:static;font-size:14px">${d.l.dir}</div>
+        <div class="times" style="margin:4px 0 0">${d.l.t1 < 0 ? '<span class="none">--</span>' : `<span class="live">${d.l.t1 === 0 ? "AR" : d.l.t1}</span>`}${d.l.t2 >= 0 ? `<small class="live"> , ${d.l.t2 === 0 ? "AR" : d.l.t2}</small>` : ""}</div></div></div>`;
+    } else {
+      led.className = "led";
+      led.innerHTML =
+        `<div class="row"><div class="badge l">L</div><div class="dir">${d.l.dir}</div><div class="times">${timesHtml(d.l.t1, d.l.t2, true, true)}</div></div>` +
+        `<div class="row"><div class="badge b">B</div><div class="dir">${d.b.dir}</div><div class="times">${timesHtml(d.b.t1, d.b.t2, d.b.live1, d.b.live2)}</div></div>`;
+    }
+  } catch { /* keep last */ }
+}
+
+// ---- start ----
+(async () => {
+  refreshPreview(); setInterval(refreshPreview, 30000);
+  if (!PIN) return showGate();
+  try { await load(); } catch (e) { if (e.message !== "locked") { $("ui").classList.remove("hidden"); banner(e.message); } }
+  setInterval(() => { if (PIN && !document.hidden) api("settings").then((d) => { S = d; render(); }).catch(() => {}); }, 20000);
+})();
+</script>
+</body>
+</html>

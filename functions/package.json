@@ -4,8 +4,8 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "lint": "node --check index.js",
-    "test": "node --test test/*.test.js"
+    "lint": "node --check index.js && node --check lib/schedule.js && node --check lib/transit.js && node --check lib/settings.js",
+    "test": "node --test"
   },
   "dependencies": {
     "firebase-admin": "^12.0.0",
