@@ -393,7 +393,7 @@ bool drawMessage(Adafruit_GFX& g, const char* text, uint8_t repeat, uint32_t ms)
 
   int x = SCREEN_W - (travelled % passW);
   g.fillScreen(C_BLACK);
-  printAt(g, x, 2, 2, C_MESSAGE, text);
+  printAt(g, x, 9, 2, C_MESSAGE, text);     // vertically centred (rows 9..22)
 
   // A tiny cat trots along the bottom after the text (facing left, so mirrored).
   int catX = x + textW + 2;
