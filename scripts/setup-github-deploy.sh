@@ -39,9 +39,21 @@ for ROLE in \
   roles/serviceusage.serviceUsageConsumer \
   roles/firebase.viewer \
   roles/storage.admin; do
-  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-    --member="serviceAccount:$SA_EMAIL" --role="$ROLE" --condition=None --quiet >/dev/null
-  echo "    granted $ROLE"
+  # A brand-new service account can take up to a minute to be visible to IAM,
+  # so retry for a bit instead of failing on the first attempt.
+  for ATTEMPT in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    if gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+        --member="serviceAccount:$SA_EMAIL" --role="$ROLE" --condition=None --quiet >/dev/null 2>&1; then
+      echo "    granted $ROLE"
+      break
+    fi
+    if [ "$ATTEMPT" = 12 ]; then
+      echo "    FAILED to grant $ROLE — re-run this script in a minute." >&2
+      exit 1
+    fi
+    echo "    waiting for the new account to be ready..."
+    sleep 10
+  done
 done
 
 echo "==> Creating a key file"
