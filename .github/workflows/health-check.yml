@@ -4,6 +4,11 @@ name: Check sign health
 # sign or the control panel seems off. It changes nothing.
 on:
   workflow_dispatch:
+    inputs:
+      play_cat:
+        description: "Also send a test 'peek' cat to the sign"
+        type: boolean
+        default: false
 
 jobs:
   check:
@@ -24,6 +29,14 @@ jobs:
           if [ -z "$SIGN_APP_PIN" ]; then echo "   SIGN_APP_PIN secret is not set"; exit 0; fi
           curl -sS -w "\n   HTTP %{http_code}\n" -H "x-sign-pin: $SIGN_APP_PIN" "$BASE/app/api/settings"
           echo
+          if [ "${{ inputs.play_cat }}" = "true" ]; then
+            echo "== Sending a test cat (peek) through the control panel API"
+            curl -sS -w "\n   HTTP %{http_code}\n" -X POST -H "content-type: application/json" \
+              -H "x-sign-pin: $SIGN_APP_PIN" -d '{"name":"peek"}' "$BASE/app/api/play"
+            echo "== /sign right after (should now include \"a\")"
+            curl -sS -w "\n   HTTP %{http_code}\n" "$BASE/sign"
+            echo
+          fi
           echo "How to read this:"
           echo " - /app HTTP 503 mentioning the database -> Firestore isn't set up (see README)."
           echo " - /app HTTP 401 -> the passphrase secret doesn't match what was deployed; re-run the deploy."
