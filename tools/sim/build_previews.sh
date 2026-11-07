@@ -16,7 +16,8 @@ if [ ! -d "$WORK/gfx" ]; then
 fi
 
 g++ -std=c++17 -O1 -Wall -DARDUINO=100 -I"$HERE/shim" -I"$WORK/gfx/src" \
-  "$HERE/sim.cpp" "$HERE/../../firmware/mta_sign/display.cpp" "$WORK/gfx/src/Adafruit_GFX.cpp" \
+  "$HERE/sim.cpp" "$HERE/../../firmware/mta_sign/display.cpp" "$HERE/../../firmware/mta_sign/cloud_anim.cpp" \
+  "$WORK/gfx/src/Adafruit_GFX.cpp" \
   -o "$WORK/sim"
 
 for scene in weekday weekend weekend-ar connecting walk chase peek message; do
@@ -26,3 +27,9 @@ for scene in weekday weekend weekend-ar connecting walk chase peek message; do
 done
 BASE=weekend "$WORK/sim" walk "$WORK/walk-weekend.rgb" >/dev/null
 python3 "$HERE/render_gif.py" "$WORK/walk-weekend.rgb" "$OUT/walk-weekend.gif"
+
+# Cloud animation example (the same one Gemini is shown as a reference)
+node -e 'process.stdout.write(JSON.stringify(require(process.argv[1]).EXAMPLE))' "$HERE/../../functions/lib/animations.js" > "$WORK/example.json"
+node "$HERE/anim2txt.js" "$WORK/example.json" > "$WORK/example.txt"
+"$WORK/sim" cloud "$WORK/cloud.rgb" "$WORK/example.txt" >/dev/null
+python3 "$HERE/render_gif.py" "$WORK/cloud.rgb" "$OUT/cloud-example.gif"

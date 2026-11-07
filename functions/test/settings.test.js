@@ -29,6 +29,6 @@ test("device view only carries fresh commands", () => {
     msg: { seq: 7, text: "Hi", repeat: 2, at: now - 10 * 60_000 }, // 10 min old
   });
   const v = s.deviceView(cfg, now);
-  assert.deepStrictEqual(v, { bd: 12, bn: 5, ie: 30, is: "walk", a: { i: 3, n: "peek" } });
+  assert.deepStrictEqual(v, { bd: 12, bn: 5, ie: 30, is: "walk", lv: 0, a: { i: 3, n: "peek" } });
   assert.strictEqual(s.deviceView(cfg, now + 120_000).a, undefined);
 });

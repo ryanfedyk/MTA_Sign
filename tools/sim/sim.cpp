@@ -1,9 +1,13 @@
 // Desktop preview: runs the sign's real drawing code (firmware/mta_sign/display.cpp)
 // and writes raw frames that render_gif.py turns into GIFs.
 //
-//   usage: sim <scene> <out.rgb>     scenes: weekday weekend walk chase peek message connecting
+//   usage: sim <scene> <out.rgb> [anim.txt]   scenes: weekday weekend walk chase peek message connecting cloud
 #include "Adafruit_GFX.h"
 #include "../../firmware/mta_sign/display.h"
+#include "../../firmware/mta_sign/cloud_anim.h"
+#include <fstream>
+#include <sstream>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string>
 
@@ -23,6 +27,28 @@ public:
       }
   }
 };
+
+// Reads the text form written by anim2txt.js
+static bool loadCloud(const char* file, CloudAnim& a) {
+  std::ifstream in(file);
+  std::string tag;
+  while (in >> tag) {
+    if (tag == "D") { int bg; in >> a.duration >> bg; a.blackBg = bg; }
+    else if (tag == "P") {
+      std::string line; std::getline(in, line); std::istringstream ls(line); std::string hex;
+      while (ls >> hex && a.ncolors < 15) { unsigned v = strtoul(hex.c_str(), nullptr, 16); a.palette[a.ncolors++] = rgb565(v >> 16, (v >> 8) & 255, v & 255); }
+    } else if (tag == "S") { CloudSprite sp; int w, h, f, n; in >> w >> h >> f >> n; sp.w = w; sp.h = h; sp.frameMs = f;
+      for (int i = 0; i < n; i++) { std::string t, fr; in >> t >> fr; std::vector<uint8_t> px;
+        for (char c : fr) px.push_back(c >= '0' && c <= '9' ? c - '0' + 1 : c >= 'a' && c <= 'e' ? c - 'a' + 11 : 0);
+        sp.frames.push_back(px); }
+      a.sprites.push_back(sp);
+    } else if (tag == "A") { CloudActor ac; int s2, o, n; in >> s2 >> o >> n; ac.sprite = s2; ac.outline = o;
+      for (int i = 0; i < n; i++) { std::string t; int kt, kx, ky, kf; in >> t >> kt >> kx >> ky >> kf; ac.keys.push_back({(uint16_t)kt, (int16_t)kx, (int16_t)ky, kf != 0}); }
+      a.actors.push_back(ac);
+    }
+  }
+  return !a.sprites.empty();
+}
 
 int main(int argc, char** argv) {
   if (argc < 3) { fprintf(stderr, "usage: sim <scene> <out.rgb>\n"); return 2; }
@@ -50,6 +76,16 @@ int main(int argc, char** argv) {
   } else if (scene == "message") {
     for (uint32_t t = 0;; t += step) {
       if (!drawMessage(p, "Dinner's ready!", 1, t)) break;
+      p.dump(f); frames++;
+    }
+  } else if (scene == "cloud") {            // sim cloud <out.rgb> <anim.txt>
+    CloudAnim a;
+    if (argc < 4 || !loadCloud(argv[3], a)) { fprintf(stderr, "bad cloud animation file\n"); return 1; }
+    const char* base = getenv("BASE");
+    TransitData& bg = (base && !strcmp(base, "weekend")) ? we : wk;
+    for (uint32_t t = 0;; t += step) {
+      drawTransit(p, bg);
+      if (!drawCloudAnim(p, a, t)) break;
       p.dump(f); frames++;
     }
   } else {

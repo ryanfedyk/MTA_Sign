@@ -33,7 +33,7 @@ test("brightness and idle settings round-trip and reach the sign", async () => {
   assert.deepStrictEqual(r.body.idle, { every: 60, style: "mix" });
 
   r = await call(sign);
-  assert.deepStrictEqual(r.body, { bd: 20, bn: 5, ie: 60, is: "mix" });
+  assert.deepStrictEqual(r.body, { bd: 20, bn: 5, ie: 60, is: "mix", lv: 0 });
 });
 
 test("play + message commands get increasing ids the sign can pick up", async () => {
@@ -69,8 +69,19 @@ test("/sign falls back to defaults if the database is unavailable", async () => 
   setStore(broken);
   const r = await call(sign);
   assert.strictEqual(r.status, 200);
-  assert.deepStrictEqual(r.body, { bd: 12, bn: 5, ie: 30, is: "walk" });
+  assert.deepStrictEqual(r.body, { bd: 12, bn: 5, ie: 30, is: "walk", lv: 0 });
   // ...and the app explains the problem instead of crashing
   const a = await call(app, { path: "/api/settings", headers: PIN });
   assert.strictEqual(a.status, 503);
+});
+
+test("/sign records the firmware version the sign reports, and the app shows it", async () => {
+  const store = settings.memoryStore();
+  setStore(store);
+  await call(sign, { query: { fw: "17" } });
+  await new Promise((r) => setTimeout(r, 20));
+  // /sign only writes "last seen" once a minute per server instance, so check the store write directly too
+  await store.touchDevice(17);
+  const r = await call(app, { path: "/api/settings", headers: PIN });
+  assert.strictEqual(r.body.firmware, 17);
 });

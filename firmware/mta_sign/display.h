@@ -32,7 +32,7 @@ AnimKind animFromName(const char* name);   // "walk", "chase", "peek" (unknown -
 
 // Screens
 // `detail` is a short status line, e.g. "WIFI", "LOADING", "ERR -1".
-void drawConnecting(Adafruit_GFX& g, uint32_t ms, const char* detail = nullptr);
+void drawConnecting(Adafruit_GFX& g, uint32_t ms, const char* detail = nullptr, const char* title = "CONNECTING");
 void drawTransit(Adafruit_GFX& g, const TransitData& t);
 
 // Draws one frame of an animation `elapsedMs` after it started, on top of

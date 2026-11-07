@@ -3,7 +3,8 @@
 // Weekdays: L train on top, B48 bus below.   Weekends: L train only, full screen.
 // Amber = live GPS, White = scheduled.
 // Every ~30 s a cat wanders across the screen. From the web app you can change
-// brightness, play an animation, or send a scrolling message.
+// brightness, play an animation, send a scrolling message, or have Gemini
+// create new animations from a prompt (downloaded from the cloud, no re-flash).
 //
 // How it's organised:
 //   - A background task (core 0) talks to the cloud: arrivals every 30 s,
@@ -12,6 +13,11 @@
 //     smooth even while a network request is in progress.
 //   - All drawing code lives in display.cpp.
 //
+// Over-the-air updates: GitHub Actions builds every firmware change on main
+// and publishes it as a release. The sign checks for a newer build every
+// 10 minutes and installs it itself -- no USB cable needed after the first flash.
+// If a new build crashes before it has shown arrivals, the board rolls back.
+//
 // Before flashing: copy secrets.example.h to secrets.h and fill in Wi-Fi.
 
 #include <WiFi.h>
@@ -19,16 +25,30 @@
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
+#include <HTTPUpdate.h>
+#include <esp_ota_ops.h>
 #include <time.h>
 
 #include "secrets.h"
 #include "display.h"
+#include "cloud_anim.h"
 
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
 static const char* TRANSIT_URL = "https://us-central1-mta-transit-matrix.cloudfunctions.net/transit";
 static const char* SIGN_URL    = "https://us-central1-mta-transit-matrix.cloudfunctions.net/sign";
+static const char* ANIMS_URL   = "https://us-central1-mta-transit-matrix.cloudfunctions.net/anims";
+
+// Firmware version = GitHub Actions build number (set by CI). Local builds are
+// version 0, so a hand-flashed sign upgrades itself to the latest release.
+#ifndef FW_VERSION
+#define FW_VERSION 0
+#endif
+static const char* FW_VERSION_URL = "https://github.com/ryanfedyk/MTA_Sign/releases/latest/download/version.txt";
+static const char* FW_BIN_URL     = "https://github.com/ryanfedyk/MTA_Sign/releases/latest/download/mta_sign.bin";
+static const uint32_t FW_CHECK_EVERY_MS = 10UL * 60 * 1000;
+static const uint32_t FW_FIRST_CHECK_MS = 20000;
 
 static const uint32_t TRANSIT_EVERY_MS = 30000;
 static const uint32_t SIGN_EVERY_MS    = 5000;
@@ -68,9 +88,10 @@ struct SignSettings {
   uint8_t dayBright = DEFAULT_DAY_BRIGHTNESS;
   uint8_t nightBright = DEFAULT_NIGHT_BRIGHTNESS;
   uint16_t idleSec = 30;           // 0 = no idle animation
-  char idleAnim[12] = "walk";      // "walk" | "chase" | "peek" | "mix"
+  char idleAnim[40] = "walk";      // "walk" | "chase" | "peek" | "mix" | "mine"
   uint32_t animId = 0;             // changes each time the app presses "Play"
-  char animName[12] = "";
+  char animName[40] = "";          // built-in name, or "c:<id>" for a cloud animation
+  uint32_t libVersion = 0;         // cloud animation library version
   uint32_t msgId = 0;              // changes each time the app sends a message
   char msgText[MAX_MSG + 1] = "";
   uint8_t msgRepeat = 2;
@@ -78,11 +99,27 @@ struct SignSettings {
 
 static TransitData gTransit;
 static SignSettings gSettings;
+static CloudLibrary gLibrary;              // animations downloaded from /anims
+static uint32_t gLoadedLibVersion = 0;
 static SemaphoreHandle_t gLock;
 
 // What the "CONNECTING" screen should say while there's no data yet.
 static volatile int gLastHttpCode = 0;      // 0 = no request finished yet
 static volatile bool gLastParseFailed = false;
+static volatile bool gUpdating = false;      // OTA in progress: show "UPDATING"
+static volatile bool gFirmwareConfirmed = false;
+
+// Tell the Arduino core not to mark this firmware as good at boot; we do it
+// ourselves once the sign has actually worked (see confirmFirmware). If it
+// crashes before then, the bootloader rolls back to the previous version.
+extern "C" bool verifyRollbackLater() { return true; }
+
+static void confirmFirmware() {
+  if (gFirmwareConfirmed) return;
+  gFirmwareConfirmed = true;
+  esp_ota_mark_app_valid_cancel_rollback();
+  Serial.printf("[ota] firmware v%d confirmed good\n", FW_VERSION);
+}
 
 MatrixPanel_I2S_DMA* dma_display = nullptr;
 
@@ -138,15 +175,84 @@ static void fetchTransit() {
   Serial.printf("[net] transit ok: lay=%s L %d,%d  B %d,%d\n", t.lOnly ? "L" : "LB", t.l1, t.l2, t.b1, t.b2);
 }
 
+// ---- cloud animation library ----
+static uint8_t paletteIndex(char c) {
+  if (c >= '0' && c <= '9') return c - '0' + 1;
+  if (c >= 'a' && c <= 'e') return c - 'a' + 11;
+  return 0;   // '.' or anything unexpected = transparent
+}
+
+static CloudAnimPtr parseCloudAnim(JsonObjectConst o) {
+  auto a = std::make_shared<CloudAnim>();
+  copyStr(a->id, sizeof a->id, o["id"] | "");
+  a->duration = o["d"] | 4000;
+  a->blackBg = (o["bg"] | 0) == 1;
+  a->idle = (o["i"] | 0) == 1;
+  for (JsonVariantConst hex : o["p"].as<JsonArrayConst>()) {
+    if (a->ncolors >= 15) break;
+    uint32_t v = strtoul(hex | "000000", nullptr, 16);
+    a->palette[a->ncolors++] = rgb565(v >> 16, (v >> 8) & 0xFF, v & 0xFF);
+  }
+  for (JsonObjectConst so : o["s"].as<JsonArrayConst>()) {
+    CloudSprite sp;
+    sp.w = so["w"] | 0;
+    sp.h = so["h"] | 0;
+    sp.frameMs = so["f"] | 150;
+    if (!sp.w || !sp.h || sp.w > 48 || sp.h > 32) return nullptr;
+    for (JsonVariantConst fv : so["fr"].as<JsonArrayConst>()) {
+      const char* fr = fv | "";
+      size_t n = strlen(fr);
+      if (n != (size_t)sp.w * sp.h) return nullptr;
+      std::vector<uint8_t> px(n);
+      for (size_t i = 0; i < n; i++) px[i] = paletteIndex(fr[i]);
+      sp.frames.push_back(std::move(px));
+    }
+    if (sp.frames.empty()) return nullptr;
+    a->sprites.push_back(std::move(sp));
+  }
+  for (JsonObjectConst ao : o["a"].as<JsonArrayConst>()) {
+    CloudActor act;
+    act.sprite = ao["s"] | 0;
+    act.outline = (ao["o"] | 1) == 1;
+    for (JsonArrayConst k : ao["k"].as<JsonArrayConst>()) {
+      act.keys.push_back({(uint16_t)(k[0] | 0), (int16_t)(k[1] | 0), (int16_t)(k[2] | 0), (k[3] | 0) == 1});
+    }
+    if (act.sprite < a->sprites.size() && !act.keys.empty()) a->actors.push_back(std::move(act));
+  }
+  if (a->sprites.empty() || a->actors.empty() || !a->id[0]) return nullptr;
+  return a;
+}
+
+static bool fetchLibrary() {
+  JsonDocument doc;
+  if (!httpGetJson(ANIMS_URL, doc)) return false;
+  CloudLibrary lib;
+  for (JsonObjectConst o : doc["a"].as<JsonArrayConst>()) {
+    CloudAnimPtr a = parseCloudAnim(o);
+    if (a) lib.push_back(a);
+  }
+  uint32_t v = doc["v"] | 0;
+  xSemaphoreTake(gLock, portMAX_DELAY);
+  gLibrary = std::move(lib);
+  gLoadedLibVersion = v;
+  xSemaphoreGive(gLock);
+  Serial.printf("[net] animation library v%u: %u animations, free heap %u\n",
+                (unsigned)v, (unsigned)gLibrary.size(), (unsigned)ESP.getFreeHeap());
+  return true;
+}
+
 static void fetchSign() {
   JsonDocument doc;
-  if (!httpGetJson(SIGN_URL, doc)) return;
+  static char url[160];
+  snprintf(url, sizeof url, "%s?fw=%d", SIGN_URL, FW_VERSION);   // lets the app show the firmware version
+  if (!httpGetJson(url, doc)) return;
 
   SignSettings s;
   s.dayBright   = doc["bd"] | DEFAULT_DAY_BRIGHTNESS;
   s.nightBright = doc["bn"] | DEFAULT_NIGHT_BRIGHTNESS;
   s.idleSec     = doc["ie"] | 30;
   copyStr(s.idleAnim, sizeof s.idleAnim, doc["is"] | "walk");
+  s.libVersion = doc["lv"] | 0;
   if (doc["a"].is<JsonObject>()) {
     s.animId = doc["a"]["i"] | 0;
     copyStr(s.animName, sizeof s.animName, doc["a"]["n"] | "");
@@ -157,13 +263,47 @@ static void fetchSign() {
     s.msgRepeat = doc["m"]["r"] | 2;
   }
 
+  // Download new/changed animations *before* publishing the settings, so a
+  // "play" command for a just-created animation finds it in the library.
+  xSemaphoreTake(gLock, portMAX_DELAY);
+  bool libStale = s.libVersion != gLoadedLibVersion;
+  xSemaphoreGive(gLock);
+  if (libStale) fetchLibrary();
+
   xSemaphoreTake(gLock, portMAX_DELAY);
   gSettings = s;
   xSemaphoreGive(gLock);
 }
 
+// ---- over-the-air update ----
+static void checkForUpdate() {
+  WiFiClientSecure client;
+  client.setInsecure();
+  HTTPClient https;
+  https.setTimeout(10000);
+  https.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);   // GitHub redirects release downloads
+  if (!https.begin(client, FW_VERSION_URL)) return;
+  int code = https.GET();
+  long latest = code == HTTP_CODE_OK ? https.getString().toInt() : -1;
+  https.end();
+  Serial.printf("[ota] running v%d, latest release v%ld (HTTP %d)\n", FW_VERSION, latest, code);
+  if (latest <= FW_VERSION) return;
+
+  gUpdating = true;
+  delay(200);   // let the drawing loop show "UPDATING"
+  WiFiClientSecure binClient;
+  binClient.setInsecure();
+  httpUpdate.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  httpUpdate.rebootOnUpdate(true);
+  t_httpUpdate_return r = httpUpdate.update(binClient, FW_BIN_URL);
+  // Only reached if the update failed (success reboots).
+  Serial.printf("[ota] update failed (%d): %s\n", (int)r, httpUpdate.getLastErrorString().c_str());
+  gUpdating = false;
+}
+
 static void netTask(void*) {
   uint32_t lastTransit = 0, lastSign = 0, offlineSince = 0, lastAttempt = millis();
+  uint32_t nextFwCheck = millis() + FW_FIRST_CHECK_MS;
   bool first = true, wasOnline = false;
   for (;;) {
     uint32_t now = millis();
@@ -197,6 +337,14 @@ static void netTask(void*) {
     if (first || now - lastTransit >= transitEvery) { lastTransit = now; fetchTransit(); }
     if (first || now - lastSign >= SIGN_EVERY_MS)   { lastSign = now;    fetchSign(); }
     first = false;
+
+    // Mark this firmware good after it has shown arrivals for a minute.
+    if (haveData && !gFirmwareConfirmed && now > 60000) confirmFirmware();
+
+    if ((int32_t)(now - nextFwCheck) >= 0) {
+      nextFwCheck = now + FW_CHECK_EVERY_MS;
+      checkForUpdate();
+    }
     vTaskDelay(pdMS_TO_TICKS(250));
   }
 }
@@ -221,6 +369,7 @@ static void connectingDetail(char* out, size_t n) {
 enum Mode { MODE_TRANSIT, MODE_ANIM, MODE_MESSAGE };
 static Mode mode = MODE_TRANSIT;
 static AnimKind currentAnim = ANIM_NONE;
+static CloudAnimPtr currentCloud;         // set when playing a cloud animation
 static uint32_t modeStart = 0, nextIdleAt = 0, seenAnimId = 0, seenMsgId = 0;
 static char currentMsg[MAX_MSG + 1] = "";
 static uint8_t currentRepeat = 2;
@@ -231,10 +380,44 @@ static void scheduleIdle(const SignSettings& s, uint32_t now) {
   nextIdleAt = now + s.idleSec * 1000UL + random(-4000, 4000);
 }
 
-static AnimKind pickIdle(const SignSettings& s) {
-  if (!strcmp(s.idleAnim, "mix")) return (AnimKind)random(ANIM_WALK, ANIM_COUNT);
-  AnimKind k = animFromName(s.idleAnim);
-  return k == ANIM_NONE ? ANIM_WALK : k;
+static CloudAnimPtr findCloud(const char* name) {
+  if (strncmp(name, "c:", 2) != 0) return nullptr;
+  CloudAnimPtr found;
+  xSemaphoreTake(gLock, portMAX_DELAY);
+  for (const auto& a : gLibrary) if (!strcmp(a->id, name + 2)) { found = a; break; }
+  xSemaphoreGive(gLock);
+  return found;
+}
+
+// Starts an animation by name: "walk" / "chase" / "peek" or "c:<id>".
+static bool startAnim(const char* name, uint32_t now) {
+  AnimKind k = animFromName(name);
+  CloudAnimPtr c = k == ANIM_NONE ? findCloud(name) : nullptr;
+  if (k == ANIM_NONE && !c) return false;
+  mode = MODE_ANIM; currentAnim = k; currentCloud = c; modeStart = now;
+  return true;
+}
+
+// Idle: a built-in cat, "mix" (built-ins + your idle animations) or "mine" (only yours).
+static void startIdle(const SignSettings& s, uint32_t now) {
+  std::vector<CloudAnimPtr> mine;
+  xSemaphoreTake(gLock, portMAX_DELAY);
+  for (const auto& a : gLibrary) if (a->idle) mine.push_back(a);
+  xSemaphoreGive(gLock);
+
+  bool isMix = !strcmp(s.idleAnim, "mix"), isMine = !strcmp(s.idleAnim, "mine");
+  if ((isMix || isMine) && !mine.empty()) {
+    int builtins = isMix ? (ANIM_COUNT - ANIM_WALK) : 0;
+    int pick = random(0, builtins + (int)mine.size());
+    if (pick >= builtins) {
+      mode = MODE_ANIM; currentAnim = ANIM_NONE; currentCloud = mine[pick - builtins]; modeStart = now;
+      return;
+    }
+    mode = MODE_ANIM; currentAnim = (AnimKind)(ANIM_WALK + pick); currentCloud = nullptr; modeStart = now;
+    return;
+  }
+  AnimKind k = isMix ? (AnimKind)random(ANIM_WALK, ANIM_COUNT) : animFromName(s.idleAnim);
+  mode = MODE_ANIM; currentAnim = k == ANIM_NONE ? ANIM_WALK : k; currentCloud = nullptr; modeStart = now;
 }
 
 static void updateBrightness(const SignSettings& s) {
@@ -269,7 +452,7 @@ void setup() {
   dma_display->setBrightness8(DEFAULT_DAY_BRIGHTNESS);
   appliedBrightness = DEFAULT_DAY_BRIGHTNESS;
 
-  Serial.printf("\n[boot] MTA sign starting, connecting to Wi-Fi \"%s\"\n", WIFI_SSID);
+  Serial.printf("\n[boot] MTA sign firmware v%d starting, connecting to Wi-Fi \"%s\"\n", FW_VERSION, WIFI_SSID);
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -304,20 +487,24 @@ void loop() {
   }
   if (s.animId && s.animId != seenAnimId) {
     seenAnimId = s.animId;
-    AnimKind k = animFromName(s.animName);
-    if (k != ANIM_NONE && mode != MODE_MESSAGE) { mode = MODE_ANIM; currentAnim = k; modeStart = now; }
+    if (mode != MODE_MESSAGE) startAnim(s.animName, now);
   }
 
   // Idle cat
   if (mode == MODE_TRANSIT && t.valid && s.idleSec > 0) {
     if ((int32_t)(now - nextIdleAt) >= 0) {
-      mode = MODE_ANIM; currentAnim = pickIdle(s); modeStart = now;
+      startIdle(s, now);
     } else if ((int32_t)(nextIdleAt - now) > (int32_t)(s.idleSec * 1000UL + 5000)) {
       scheduleIdle(s, now);   // interval was shortened in the app
     }
   }
 
   // Draw one frame
+  if (gUpdating) {
+    drawConnecting(*dma_display, now, "KEEP POWER", "UPDATING");
+    dma_display->flipDMABuffer();
+    return;
+  }
   if (mode == MODE_MESSAGE) {
     if (!drawMessage(*dma_display, currentMsg, currentRepeat, now - modeStart)) {
       mode = MODE_TRANSIT;
@@ -331,9 +518,15 @@ void loop() {
       drawConnecting(*dma_display, now, detail);
     } else {
       drawTransit(*dma_display, t);
-      if (mode == MODE_ANIM && !drawAnim(*dma_display, currentAnim, now - modeStart)) {
-        mode = MODE_TRANSIT;
-        scheduleIdle(s, now);
+      if (mode == MODE_ANIM) {
+        bool running = currentCloud ? drawCloudAnim(*dma_display, *currentCloud, now - modeStart)
+                                    : drawAnim(*dma_display, currentAnim, now - modeStart);
+        if (!running) {
+          if (currentCloud && currentCloud->blackBg) drawTransit(*dma_display, t);   // don't flash black
+          mode = MODE_TRANSIT;
+          currentCloud = nullptr;
+          scheduleIdle(s, now);
+        }
       }
     }
   }

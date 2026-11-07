@@ -3,6 +3,8 @@
 //   /transit  arrivals for the ESP32 (polled every 30 s)
 //   /sign     brightness, idle-cat settings, and pending animation/message
 //             commands for the ESP32 (polled every 5 s)
+//   /anims    your saved animations in the compact format the ESP32 plays
+//             (re-downloaded whenever the library version in /sign changes)
 //   /app      the phone-friendly control panel, plus its small JSON API
 //
 // Secrets never live in this repo (it's public). At deploy time GitHub Actions
@@ -10,6 +12,8 @@
 // that file into process.env:
 //   MTA_BUS_KEY   MTA Bus Time API key
 //   SIGN_APP_PIN  passphrase for the control panel
+//   GEMINI_API_KEY  Google AI Studio key for generating animations (optional)
+//   GEMINI_MODEL    override the Gemini model (optional, default gemini-3.8-flash)
 
 const fs = require("fs");
 const path = require("path");
@@ -19,6 +23,7 @@ const { onRequest } = require("firebase-functions/v2/https");
 const { planFor } = require("./lib/schedule");
 const { buildArrivals } = require("./lib/transit");
 const settings = require("./lib/settings");
+const animations = require("./lib/animations");
 
 const HTTP_OPTS = { cors: true, memory: "256MiB", timeoutSeconds: 15 };
 
@@ -59,10 +64,40 @@ exports.sign = onRequest(HTTP_OPTS, async (req, res) => {
   // Remember when the sign last checked in (at most once a minute).
   if (Date.now() - lastTouch > 60000) {
     lastTouch = Date.now();
-    getStore().touchDevice().catch((e) => console.error("touchDevice:", e.message));
+    const fw = Number.parseInt(req.query.fw, 10);
+    getStore().touchDevice(Number.isFinite(fw) ? fw : null).catch((e) => console.error("touchDevice:", e.message));
   }
   res.set("Cache-Control", "no-store");
   res.json(settings.deviceView(cfg));
+});
+
+// ---------------------------------------------------------------------------
+// /anims  (ESP32 animation library)
+// ---------------------------------------------------------------------------
+async function deviceLibrary() {
+  const s = getStore();
+  const [cfg, list] = await Promise.all([s.get(), s.listAnimations()]);
+  const out = [];
+  let bytes = 0;
+  for (const a of list.slice(0, animations.LIMITS.maxLibrary)) {
+    if (!a.spec) continue;
+    const dev = animations.toDevice(a.spec, a.id, { idle: a.inIdle });
+    const size = JSON.stringify(dev).length;
+    if (bytes + size > animations.LIMITS.maxDeviceBytes) continue;   // keep the sign's download small
+    bytes += size;
+    out.push(dev);
+  }
+  return { v: cfg.lib.v % 1e9, a: out };
+}
+
+exports.anims = onRequest(HTTP_OPTS, async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  try {
+    res.json(await deviceLibrary());
+  } catch (err) {
+    console.error("anims:", err.message);
+    res.json({ v: 0, a: [] });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -79,7 +114,8 @@ function pinOk(given) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-exports.app = onRequest(HTTP_OPTS, async (req, res) => {
+// Gemini can take a while to draw, so the app gets a longer timeout.
+exports.app = onRequest({ ...HTTP_OPTS, memory: "512MiB", timeoutSeconds: 120 }, async (req, res) => {
   const route = new URL(req.url, "http://localhost").pathname.replace(/\/+$/, "") || "/";
   res.set("Cache-Control", "no-store");
 
@@ -109,9 +145,49 @@ exports.app = onRequest(HTTP_OPTS, async (req, res) => {
       return res.json(settings.appView(await s.get()));
     }
     if (req.method === "POST" && route === "/api/play") {
-      if (!settings.ANIMATIONS.some((a) => a.id === body.name)) return res.status(400).json({ error: "Unknown animation" });
-      const entry = await s.command("anim", { name: body.name });
+      const name = String(body.name || "");
+      const builtin = settings.ANIMATIONS.some((a) => a.id === name);
+      const cloud = name.startsWith("c:") && (await s.listAnimations()).some((a) => "c:" + a.id === name);
+      if (!builtin && !cloud) return res.status(400).json({ error: "Unknown animation" });
+      const entry = await s.command("anim", { name });
       return res.json({ ok: true, seq: entry.seq });
+    }
+
+    // ---- your animations ----
+    if (req.method === "GET" && route === "/api/animations") {
+      const list = await s.listAnimations();
+      return res.json({ animations: list, geminiReady: Boolean(process.env.GEMINI_API_KEY) });
+    }
+    if (req.method === "POST" && route === "/api/animations/generate") {
+      let spec;
+      try {
+        spec = await animations.generateAnimation(body.prompt, {
+          apiKey: process.env.GEMINI_API_KEY,
+          model: process.env.GEMINI_MODEL || undefined,
+        });
+      } catch (e) {
+        console.error("generate:", e.message);
+        return res.status(e.status === 429 ? 429 : 422).json({ error: e.message });
+      }
+      const prompt = String(body.prompt).trim().slice(0, animations.LIMITS.maxPromptLength);
+      const id = await s.addAnimation({ name: spec.name, prompt, spec, inIdle: false, createdAt: Date.now() });
+      return res.json({ ok: true, animation: { id, name: spec.name, prompt, spec, inIdle: false } });
+    }
+    if (req.method === "POST" && route === "/api/animations/update") {
+      if (!body.id) return res.status(400).json({ error: "Missing id" });
+      const patch = {};
+      if (body.inIdle !== undefined) patch.inIdle = Boolean(body.inIdle);
+      if (body.name !== undefined) patch.name = String(body.name).replace(/[^\x20-\x7E]/g, "").trim().slice(0, 40);
+      if (body.spec !== undefined) {
+        try { patch.spec = animations.normalizeSpec(body.spec); } catch (e) { return res.status(400).json({ error: e.message }); }
+      }
+      await s.updateAnimation(String(body.id), patch);
+      return res.json({ ok: true });
+    }
+    if (req.method === "POST" && route === "/api/animations/delete") {
+      if (!body.id) return res.status(400).json({ error: "Missing id" });
+      await s.deleteAnimation(String(body.id));
+      return res.json({ ok: true });
     }
     if (req.method === "POST" && route === "/api/message") {
       const text = settings.cleanMessage(body.text);

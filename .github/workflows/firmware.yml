@@ -2,13 +2,19 @@ name: Build firmware
 
 # Compiles the ESP32 sketch for the Waveshare ESP32-S3 board on every change,
 # so a broken build is caught before anyone tries to flash the sign.
-# The compiled firmware is attached to each run as a downloadable artifact.
+#
+# On main, the build is also published as a GitHub release (fw-<number>). The
+# sign checks the latest release every 10 minutes and updates itself over the
+# air -- that's how firmware changes reach it without a USB cable.
 on:
   push:
     paths: ["firmware/**", "tools/sim/**", ".github/workflows/firmware.yml"]
   pull_request:
     paths: ["firmware/**", "tools/sim/**", ".github/workflows/firmware.yml"]
   workflow_dispatch:
+
+permissions:
+  contents: write   # publish firmware releases
 
 jobs:
   compile:
@@ -30,15 +36,29 @@ jobs:
       - name: Use placeholder Wi-Fi secrets
         run: cp firmware/mta_sign/secrets.example.h firmware/mta_sign/secrets.h
 
-      - name: Compile
+      - name: Compile (firmware version = build number ${{ github.run_number }})
         run: |
           arduino-cli compile --fqbn esp32:esp32:esp32s3 --warnings default \
+            --build-property "compiler.cpp.extra_flags=-DFW_VERSION=${{ github.run_number }}" \
             --output-dir build firmware/mta_sign
 
       - uses: actions/upload-artifact@v4
         with:
           name: mta_sign-firmware
           path: build/*.bin
+
+      - name: Publish release for over-the-air update (main only)
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ github.run_number }}
+        run: |
+          cp build/mta_sign.ino.bin build/mta_sign.bin
+          echo "$V" > build/version.txt
+          gh release create "fw-$V" build/mta_sign.bin build/version.txt \
+            --repo "${{ github.repository }}" --target "${{ github.sha }}" --latest \
+            --title "Firmware $V" \
+            --notes "Built from ${{ github.sha }}. The sign installs this automatically within ~10 minutes."
 
   preview:
     # Renders GIF previews of every screen and animation using the real drawing code.

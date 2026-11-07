@@ -238,9 +238,9 @@ static void printNumAt(Adafruit_GFX& g, int x, int y, uint8_t size, uint16_t col
 // ---------------------------------------------------------------------------
 // Connecting screen
 // ---------------------------------------------------------------------------
-void drawConnecting(Adafruit_GFX& g, uint32_t ms, const char* detail) {
+void drawConnecting(Adafruit_GFX& g, uint32_t ms, const char* detail, const char* title) {
   g.fillScreen(C_BLACK);
-  printAt(g, 2, 6, 1, rgb565(200, 200, 200), "CONNECTING");
+  printAt(g, (SCREEN_W - ((int)strlen(title) * 6 - 1)) / 2, 6, 1, rgb565(200, 200, 200), title);
   int dots = (ms / 400) % 4;
   for (int i = 0; i < dots; i++) g.drawPixel(28 + i * 3, 16, rgb565(200, 200, 200));
   if (detail && *detail) {

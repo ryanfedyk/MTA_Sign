@@ -7,7 +7,8 @@ const ANIMATIONS = [
   { id: "chase", label: "Yarn chase" },
   { id: "peek", label: "Peek-a-boo" },
 ];
-const IDLE_STYLES = [...ANIMATIONS.map((a) => a.id), "mix"];
+// "mix" = built-in cats + your animations marked for idle; "mine" = only yours
+const IDLE_STYLES = [...ANIMATIONS.map((a) => a.id), "mix", "mine"];
 
 const DEFAULTS = Object.freeze({
   brightness: { day: 12, night: 5 },   // 8-bit panel brightness (was 16 / 6 originally)
@@ -33,6 +34,7 @@ function withDefaults(data = {}) {
     anim: data.anim || null,
     msg: data.msg || null,
     device: data.device || null,
+    lib: { v: (data.lib && data.lib.v) || 0 },
   };
 }
 
@@ -83,6 +85,7 @@ function deviceView(cfg, nowMs = Date.now()) {
     bn: cfg.brightness.night,
     ie: cfg.idle.every,
     is: cfg.idle.style,
+    lv: cfg.lib.v % 1e9,  // animation library version (fits 32 bits); the sign re-downloads /anims when it changes
   };
   if (cfg.anim && nowMs - cfg.anim.at < ANIM_FRESH_MS) out.a = { i: cfg.anim.seq, n: cfg.anim.name };
   if (cfg.msg && nowMs - cfg.msg.at < MSG_FRESH_MS) out.m = { i: cfg.msg.seq, t: cfg.msg.text, r: cfg.msg.repeat };
@@ -95,6 +98,7 @@ function appView(cfg, nowMs = Date.now()) {
     brightness: cfg.brightness,
     idle: cfg.idle,
     lastSeenSecondsAgo: cfg.device?.lastSeen ? Math.round((nowMs - cfg.device.lastSeen) / 1000) : null,
+    firmware: cfg.device?.fw ?? null,
     animations: ANIMATIONS,
     idleStyles: IDLE_STYLES,
     limits: LIMITS,
@@ -129,14 +133,54 @@ function firestoreStore() {
         return entry;
       });
     },
-    async touchDevice() {
-      await ref.set({ device: { lastSeen: Date.now() } }, { merge: true });
+    async touchDevice(fw = null) {
+      await ref.set({ device: { lastSeen: Date.now(), ...(fw !== null ? { fw } : {}) } }, { merge: true });
+    },
+
+    // ---- animation library (collection "animations") ----
+    async listAnimations() {
+      const snap = await getFirestore().collection("animations").orderBy("createdAt", "desc").limit(50).get();
+      return snap.docs.map((d) => fromDoc(d.id, d.data()));
+    },
+    async addAnimation(a) {
+      const doc = await getFirestore().collection("animations").add(toDoc(a));
+      await bumpLib();
+      return doc.id;
+    },
+    async updateAnimation(id, patch) {
+      await getFirestore().collection("animations").doc(id).set(toDoc(patch), { merge: true });
+      await bumpLib();
+    },
+    async deleteAnimation(id) {
+      await getFirestore().collection("animations").doc(id).delete();
+      await bumpLib();
     },
   };
+
+  async function bumpLib() {
+    await ref.set({ lib: { v: Date.now() } }, { merge: true });
+  }
+}
+
+// Firestore can't store arrays of arrays (sprite frames), so the spec is kept as JSON text.
+function toDoc(a) {
+  const d = {};
+  if (a.name !== undefined) d.name = a.name;
+  if (a.prompt !== undefined) d.prompt = a.prompt;
+  if (a.inIdle !== undefined) d.inIdle = Boolean(a.inIdle);
+  if (a.spec !== undefined) d.specJson = JSON.stringify(a.spec);
+  if (a.createdAt !== undefined) d.createdAt = a.createdAt;
+  return d;
+}
+function fromDoc(id, d) {
+  return { id, name: d.name, prompt: d.prompt || "", inIdle: Boolean(d.inIdle), createdAt: d.createdAt || 0,
+    spec: d.specJson ? JSON.parse(d.specJson) : null };
 }
 
 function memoryStore(initial = {}) {
   let data = JSON.parse(JSON.stringify(initial));
+  const anims = {};
+  let nextId = 0;
   const merge = (a, b) => {
     for (const [k, v] of Object.entries(b)) {
       a[k] = v && typeof v === "object" && !Array.isArray(v) ? merge(a[k] && typeof a[k] === "object" ? a[k] : {}, v) : v;
@@ -151,7 +195,24 @@ function memoryStore(initial = {}) {
       data[kind] = entry;
       return entry;
     },
-    async touchDevice() { merge(data, { device: { lastSeen: Date.now() } }); },
+    async touchDevice(fw = null) { merge(data, { device: { lastSeen: Date.now(), ...(fw !== null ? { fw } : {}) } }); },
+    async listAnimations() {
+      return Object.entries(anims).map(([id, d]) => fromDoc(id, d)).sort((a, b) => b.createdAt - a.createdAt);
+    },
+    async addAnimation(a) {
+      const id = "anim" + ++nextId;
+      anims[id] = toDoc(a);
+      merge(data, { lib: { v: (data.lib?.v || 0) + 1 } });
+      return id;
+    },
+    async updateAnimation(id, patch) {
+      anims[id] = { ...(anims[id] || {}), ...toDoc(patch) };
+      merge(data, { lib: { v: (data.lib?.v || 0) + 1 } });
+    },
+    async deleteAnimation(id) {
+      delete anims[id];
+      merge(data, { lib: { v: (data.lib?.v || 0) + 1 } });
+    },
     _data: () => data,
   };
 }
