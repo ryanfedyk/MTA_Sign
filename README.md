@@ -49,8 +49,8 @@ GitHub → this repo → **Settings → Secrets and variables → Actions → Ne
    curl -fsSL https://raw.githubusercontent.com/ryanfedyk/MTA_Sign/main/scripts/setup-github-deploy.sh | bash
    ```
    (If the code isn't on `main` yet, swap `main` for the branch name.)
-3. The script ends by printing a block of text that starts with `{` and ends with `}`.
-   Copy all of it.
+3. The script ends by printing one long line of letters and numbers between two
+   dashed lines. Copy all of it. Line breaks picked up while copying are fine.
 4. Add it as a repository secret named `GCP_SA_KEY`, the same way as step 1.
 5. Back in Cloud Shell, delete the local copy:
    ```bash

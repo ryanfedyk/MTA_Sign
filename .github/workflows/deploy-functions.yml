@@ -5,10 +5,10 @@ name: Test & deploy cloud function
 # - "Run workflow" button on the Actions tab: test, then deploy on demand.
 on:
   pull_request:
-    paths: ["functions/**", "firebase.json", ".firebaserc", ".github/workflows/deploy-functions.yml"]
+    paths: ["functions/**", "firebase.json", ".firebaserc", ".github/workflows/deploy-functions.yml", ".github/scripts/**"]
   push:
     branches: [main]
-    paths: ["functions/**", "firebase.json", ".firebaserc", ".github/workflows/deploy-functions.yml"]
+    paths: ["functions/**", "firebase.json", ".firebaserc", ".github/workflows/deploy-functions.yml", ".github/scripts/**"]
   workflow_dispatch:
 
 concurrency:
@@ -22,8 +22,8 @@ jobs:
       run:
         working-directory: functions
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -37,8 +37,8 @@ jobs:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -64,9 +64,11 @@ jobs:
         run: printf 'MTA_BUS_KEY=%s\n' "$MTA_BUS_KEY" > functions/.env
 
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          node .github/scripts/write-gcp-key.js "$RUNNER_TEMP/gcp-key.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/gcp-key.json" >> "$GITHUB_ENV"
 
       - name: Deploy to Firebase
         run: npx --yes firebase-tools@15 deploy --only functions --project mta-transit-matrix --non-interactive --force
@@ -77,3 +79,7 @@ jobs:
           body=$(curl -fsS --retry 3 --retry-delay 5 https://us-central1-mta-transit-matrix.cloudfunctions.net/transit)
           echo "Live response: $body"
           echo "$body" | node -e 'const b=JSON.parse(require("fs").readFileSync(0,"utf8")); if(!b.l||!b.b) process.exit(1)'
+
+      - name: Remove key file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/gcp-key.json"

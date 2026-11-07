@@ -64,15 +64,14 @@ cat <<MSG
 
 ======================================================================
  Done. Next:
-   1. Copy EVERYTHING printed between the lines below (including { and }).
+   1. Copy the long line of letters/numbers printed between the dashes.
    2. In GitHub: MTA_Sign repo -> Settings -> Secrets and variables ->
-      Actions -> New repository secret
-         Name:  GCP_SA_KEY
+      Actions -> GCP_SA_KEY (or New repository secret named GCP_SA_KEY)
          Value: (paste)
    3. Then delete the key from Cloud Shell:  rm $KEY_FILE
 ======================================================================
 MSG
 echo "----------------------------------------------------------------------"
-cat "$KEY_FILE"
+base64 -w0 "$KEY_FILE"
 echo
 echo "----------------------------------------------------------------------"
