@@ -6,14 +6,18 @@
 //   SMALL  6 rows: cap height 5 (rows 0-4), x-height 4 (rows 1-4), row 5 is
 //          for descenders (y). Used for labels like "Manhattan", the "m"
 //          unit, and the following train's time.
+//   MED    8 rows: bold 2-px verticals; the following train's time and a
+//          bold "m" unit (6 rows tall, sits on the baseline).
 //   BIG   14 rows: condensed, 2-px strokes, countdown-clock style digits.
 //   BULLET_L: the L inside the round route bullet (13 rows, 3-px stroke).
 #pragma once
 
 struct SmallGlyph { char c; const char* r[6]; };
+struct MedGlyph   { char c; const char* r[8]; };
 struct BigGlyph   { char c; const char* r[14]; };
 
 static const int SMALL_H = 6;
+static const int MED_H = 8;
 static const int BIG_H = 14;
 
 static const SmallGlyph SMALL_FONT[] = {
@@ -43,6 +47,23 @@ static const SmallGlyph SMALL_FONT[] = {
   {'9', {"###", "#.#", "###", "..#", "###", "..."}},
   {'-', {"...", "...", "###", "...", "...", "..."}},
   {' ', {"..", "..", "..", "..", "..", ".."}},
+};
+
+static const MedGlyph MED_FONT[] = {
+  {'0', {".###.", "##.##", "##.##", "##.##", "##.##", "##.##", "##.##", ".###."}},
+  {'1', {".##", "###", ".##", ".##", ".##", ".##", ".##", ".##"}},
+  {'2', {".###.", "##.##", "...##", "..##.", ".##..", "##...", "##...", "#####"}},
+  {'3', {"####.", "...##", "...##", ".###.", "...##", "...##", "...##", "####."}},
+  {'4', {"##.##", "##.##", "##.##", "#####", "...##", "...##", "...##", "...##"}},
+  {'5', {"#####", "##...", "##...", "####.", "...##", "...##", "##.##", ".###."}},
+  {'6', {".###.", "##...", "##...", "####.", "##.##", "##.##", "##.##", ".###."}},
+  {'7', {"#####", "...##", "...##", "..##.", "..##.", ".##..", ".##..", ".##.."}},
+  {'8', {".###.", "##.##", "##.##", ".###.", "##.##", "##.##", "##.##", ".###."}},
+  {'9', {".###.", "##.##", "##.##", "##.##", ".####", "...##", "...##", ".###."}},
+  {'A', {".###.", "##.##", "##.##", "#####", "##.##", "##.##", "##.##", "##.##"}},
+  {'R', {"####.", "##.##", "##.##", "####.", "##.#.", "##.##", "##.##", "##.##"}},
+  // bold "m": 6 rows tall, top two rows blank so it sits on the baseline
+  {'m', {"........", "........", "######..", "########", "##.##.##", "##.##.##", "##.##.##", "##.##.##"}},
 };
 
 static const BigGlyph BIG_FONT[] = {
