@@ -10,6 +10,10 @@ on:
         description: "Also send a test 'peek' cat to the sign"
         type: boolean
         default: false
+      test_gemini:
+        description: "Also ask Gemini for a test animation (saved, then deleted)"
+        type: boolean
+        default: false
 
 jobs:
   check:
@@ -36,6 +40,27 @@ jobs:
               -H "x-sign-pin: $SIGN_APP_PIN" -d '{"name":"peek"}' "$BASE/app/api/play"
             echo "== /sign right after (should now include \"a\")"
             curl -sS -w "\n   HTTP %{http_code}\n" "$BASE/sign"
+            echo
+          fi
+          if [ "${{ inputs.test_gemini }}" = "true" ]; then
+            echo "== Asking Gemini for a test animation (can take ~60 s)"
+            out=$(curl -sS -m 130 -w "\n%{http_code}" -X POST -H "content-type: application/json" \
+              -H "x-sign-pin: $SIGN_APP_PIN" -d '{"prompt":"a small cat walks across the bottom of the sign"}' \
+              "$BASE/app/api/animations/generate")
+            code=$(echo "$out" | tail -n1); body=$(echo "$out" | sed '$d')
+            echo "   HTTP $code"
+            echo "$body" | node -e '
+              const b = JSON.parse(require("fs").readFileSync(0, "utf8"));
+              if (!b.animation) { console.log("   error:", b.error); process.exit(0); }
+              const s = b.animation.spec;
+              console.log("   name:", s.name, "| duration:", s.duration_ms, "ms | background:", s.background);
+              console.log("   colors:", Object.keys(s.palette).length, "| sprites:", s.sprites.map(x => x.frames[0][0].length + "x" + x.frames[0].length + "x" + x.frames.length + "f").join(", "), "| actors:", s.actors.length);
+              console.log(s.sprites[0].frames[0].map(r => "   " + r).join("\n"));
+              require("fs").writeFileSync("/tmp/anim_id", b.animation.id);'
+            if [ -s /tmp/anim_id ]; then
+              curl -sS -o /dev/null -X POST -H "content-type: application/json" -H "x-sign-pin: $SIGN_APP_PIN" \
+                -d "{\"id\":\"$(cat /tmp/anim_id)\"}" "$BASE/app/api/animations/delete" && echo "   (test animation deleted)"
+            fi
             echo
           fi
           echo "How to read this:"
