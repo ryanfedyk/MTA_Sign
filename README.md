@@ -106,6 +106,17 @@ database, run this in Cloud Shell:
 gcloud services enable firestore.googleapis.com --project mta-transit-matrix && gcloud firestore databases create --database="(default)" --location=nam5 --project mta-transit-matrix
 ```
 
+## Troubleshooting
+
+- **Sign stuck on CONNECTING:** read the amber line underneath. **NO WIFI** or
+  **WIFI PASS?** mean the Wi-Fi name or password in `secrets.h` is wrong (edit
+  `secrets.h`, not `secrets.example.h`). **ERR** plus a number means the cloud
+  request failed.
+- **Control panel not affecting the sign:** first reload the page. If that doesn't help,
+  go to the Actions tab and run **Check sign health**. It shows what the sign receives,
+  whether the passphrase works, and when the sign last checked in. Tick "send a test cat"
+  to test the whole path end to end.
+
 ## Flashing the firmware
 
 1. Copy `firmware/mta_sign/secrets.example.h` to `firmware/mta_sign/secrets.h` and

@@ -1,7 +1,8 @@
 name: Check sign health
 
-# Read-only check of the live system. Run it from the Actions tab whenever the
-# sign or the control panel seems off. It changes nothing.
+# Checks the live system. Run it from the Actions tab whenever the
+# sign or the control panel seems off. It changes nothing unless you tick
+# "send a test cat".
 on:
   workflow_dispatch:
     inputs:
