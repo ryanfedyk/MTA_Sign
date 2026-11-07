@@ -18,6 +18,11 @@
 // 10 minutes and installs it itself -- no USB cable needed after the first flash.
 // If a new build crashes before it has shown arrivals, the board rolls back.
 //
+// Wi-Fi details: the first time you flash from the Arduino IDE (with your real
+// secrets.h), they're saved in the board's settings storage. Builds from
+// GitHub only contain placeholders, so they use the saved details -- updates
+// never erase them.
+//
 // Before flashing: copy secrets.example.h to secrets.h and fill in Wi-Fi.
 
 #include <WiFi.h>
@@ -26,6 +31,7 @@
 #include <ArduinoJson.h>
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include <HTTPUpdate.h>
+#include <Preferences.h>
 #include <esp_ota_ops.h>
 #include <time.h>
 
@@ -107,6 +113,30 @@ static SemaphoreHandle_t gLock;
 static volatile int gLastHttpCode = 0;      // 0 = no request finished yet
 static volatile bool gLastParseFailed = false;
 static volatile bool gUpdating = false;      // OTA in progress: show "UPDATING"
+
+// ---- Wi-Fi details (kept in flash settings so OTA builds keep working) ----
+static char gSsid[64] = "", gPass[64] = "";
+
+static void loadWifiCredentials() {
+  Preferences prefs;
+  prefs.begin("wifi", false);
+  const bool compiledIn = strlen(WIFI_SSID) > 0 && strcmp(WIFI_SSID, "your-wifi-name") != 0;
+  if (compiledIn) {
+    // Hand-flashed build with real details: use them and remember them.
+    strncpy(gSsid, WIFI_SSID, sizeof gSsid - 1);
+    strncpy(gPass, WIFI_PASSWORD, sizeof gPass - 1);
+    if (prefs.getString("ssid", "") != gSsid || prefs.getString("pass", "") != gPass) {
+      prefs.putString("ssid", gSsid);
+      prefs.putString("pass", gPass);
+      Serial.println("[wifi] saved Wi-Fi details to settings storage");
+    }
+  } else {
+    // Build from GitHub (placeholders): use the saved details.
+    prefs.getString("ssid", "").toCharArray(gSsid, sizeof gSsid);
+    prefs.getString("pass", "").toCharArray(gPass, sizeof gPass);
+  }
+  prefs.end();
+}
 static volatile bool gFirmwareConfirmed = false;
 
 // Tell the Arduino core not to mark this firmware as good at boot; we do it
@@ -312,10 +342,11 @@ static void netTask(void*) {
       // Wi-Fi watchdog: give each attempt 30 s to finish, then start a fresh one.
       // Reboot if we've been offline for 5 minutes.
       if (!offlineSince) offlineSince = now;
+      if (!gSsid[0]) { vTaskDelay(pdMS_TO_TICKS(1000)); continue; }   // nothing to connect to
       if (now - lastAttempt > 30000) {
         Serial.printf("[wifi] still not connected (status %d), retrying\n", (int)WiFi.status());
         WiFi.disconnect();
-        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        WiFi.begin(gSsid, gPass);
         lastAttempt = now;
       }
       if (now - offlineSince > WIFI_GIVE_UP_MS) ESP.restart();
@@ -352,6 +383,7 @@ static void netTask(void*) {
 // Short status line for the CONNECTING screen.
 static void connectingDetail(char* out, size_t n) {
   wl_status_t ws = WiFi.status();
+  if (!gSsid[0]) { snprintf(out, n, "SET WIFI"); return; }   // no saved details: flash once from the IDE
   if (ws != WL_CONNECTED) {
     if (ws == WL_NO_SSID_AVAIL)       snprintf(out, n, "NO WIFI");    // network name not found
     else if (ws == WL_CONNECT_FAILED) snprintf(out, n, "WIFI PASS?"); // usually a wrong password
@@ -452,10 +484,11 @@ void setup() {
   dma_display->setBrightness8(DEFAULT_DAY_BRIGHTNESS);
   appliedBrightness = DEFAULT_DAY_BRIGHTNESS;
 
-  Serial.printf("\n[boot] MTA sign firmware v%d starting, connecting to Wi-Fi \"%s\"\n", FW_VERSION, WIFI_SSID);
+  loadWifiCredentials();
+  Serial.printf("\n[boot] MTA sign firmware v%d starting, connecting to Wi-Fi \"%s\"\n", FW_VERSION, gSsid);
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  if (gSsid[0]) WiFi.begin(gSsid, gPass);
   configTzTime("EST5EDT,M3.2.0,M11.1.0", "pool.ntp.org", "time.nist.gov");
 
   randomSeed(esp_random());
