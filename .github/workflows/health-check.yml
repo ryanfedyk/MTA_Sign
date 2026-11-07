@@ -1,0 +1,30 @@
+name: Check sign health
+
+# Read-only check of the live system. Run it from the Actions tab whenever the
+# sign or the control panel seems off. It changes nothing.
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check endpoints
+        env:
+          SIGN_APP_PIN: ${{ secrets.SIGN_APP_PIN }}
+        run: |
+          BASE=https://us-central1-mta-transit-matrix.cloudfunctions.net
+          echo "== /transit (arrivals the sign shows)"
+          curl -sS -w "\n   HTTP %{http_code}\n" "$BASE/transit"
+          echo
+          echo "== /sign (settings + commands the sign polls every 5 s)"
+          curl -sS -w "\n   HTTP %{http_code}\n" "$BASE/sign"
+          echo
+          echo "== /app/api/settings (control panel, using SIGN_APP_PIN)"
+          if [ -z "$SIGN_APP_PIN" ]; then echo "   SIGN_APP_PIN secret is not set"; exit 0; fi
+          curl -sS -w "\n   HTTP %{http_code}\n" -H "x-sign-pin: $SIGN_APP_PIN" "$BASE/app/api/settings"
+          echo
+          echo "How to read this:"
+          echo " - /app HTTP 503 mentioning the database -> Firestore isn't set up (see README)."
+          echo " - /app HTTP 401 -> the passphrase secret doesn't match what was deployed; re-run the deploy."
+          echo " - lastSeenSecondsAgo null or large -> the sign isn't reaching /sign."
