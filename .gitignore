@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Secrets — never commit these (this repo is public)
+functions/.env
+functions/.env.*
+firmware/**/secrets.h
+*.key.json
+service-account*.json
+
+# Firebase local state
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+
+# OS / editor
+.DS_Store
+__MACOSX/

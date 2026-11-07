@@ -1,0 +1,79 @@
+name: Test & deploy cloud function
+
+# - Every pull request: run the offline tests.
+# - Every push to main that touches the cloud function: test, then deploy to Firebase.
+# - "Run workflow" button on the Actions tab: test, then deploy on demand.
+on:
+  pull_request:
+    paths: ["functions/**", "firebase.json", ".firebaserc", ".github/workflows/deploy-functions.yml"]
+  push:
+    branches: [main]
+    paths: ["functions/**", "firebase.json", ".firebaserc", ".github/workflows/deploy-functions.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-functions-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: functions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Check required secrets are set
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          MTA_BUS_KEY: ${{ secrets.MTA_BUS_KEY }}
+        run: |
+          missing=0
+          [ -n "$GCP_SA_KEY" ]  || { echo "::error::Repository secret GCP_SA_KEY is not set (see README → One-time setup)"; missing=1; }
+          [ -n "$MTA_BUS_KEY" ] || { echo "::error::Repository secret MTA_BUS_KEY is not set (see README → One-time setup)"; missing=1; }
+          exit $missing
+
+      - name: Install function dependencies
+        working-directory: functions
+        run: npm ci
+
+      - name: Write runtime config (functions/.env)
+        env:
+          MTA_BUS_KEY: ${{ secrets.MTA_BUS_KEY }}
+        run: printf 'MTA_BUS_KEY=%s\n' "$MTA_BUS_KEY" > functions/.env
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Deploy to Firebase
+        run: npx --yes firebase-tools@15 deploy --only functions --project mta-transit-matrix --non-interactive --force
+
+      - name: Smoke-test the live endpoint
+        run: |
+          sleep 10
+          body=$(curl -fsS --retry 3 --retry-delay 5 https://us-central1-mta-transit-matrix.cloudfunctions.net/transit)
+          echo "Live response: $body"
+          echo "$body" | node -e 'const b=JSON.parse(require("fs").readFileSync(0,"utf8")); if(!b.l||!b.b) process.exit(1)'
