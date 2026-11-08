@@ -20,7 +20,8 @@ const path = require("path");
 const crypto = require("crypto");
 const { onRequest } = require("firebase-functions/v2/https");
 
-const { planFor } = require("./lib/schedule");
+const schedule = require("./lib/schedule");
+const { planFor } = schedule;
 const { buildArrivals } = require("./lib/transit");
 const settings = require("./lib/settings");
 const animations = require("./lib/animations");
@@ -28,6 +29,19 @@ const animations = require("./lib/animations");
 const HTTP_OPTS = { cors: true, memory: "256MiB", timeoutSeconds: 15 };
 
 const { getStore } = require("./lib/store");
+
+// The schedule changes rarely, so each server instance keeps it for 30 s.
+let cachedBlocks = null, cachedAt = 0;
+async function scheduleBlocks() {
+  if (Date.now() - cachedAt < 30000) return cachedBlocks;
+  try {
+    cachedBlocks = (await getStore().get()).schedule.blocks;   // null = original rules
+  } catch (e) {
+    console.error("schedule unavailable, using defaults:", e.message);
+  }
+  cachedAt = Date.now();
+  return cachedBlocks;
+}
 
 // ---------------------------------------------------------------------------
 // /transit
@@ -41,7 +55,7 @@ exports.transit = onRequest(HTTP_OPTS, async (req, res) => {
     const now = req.query.at ? new Date(String(req.query.at)) : new Date();
     if (Number.isNaN(now.getTime())) return res.status(400).json({ error: "bad ?at= time" });
 
-    const plan = planFor(now, { busDir: req.query.dir });
+    const plan = planFor(now, { busDir: req.query.dir }, await scheduleBlocks());
     const body = await buildArrivals(plan, { busKey, debug: req.query.debug === "1" });
     res.json(body);
   } catch (err) {
@@ -172,6 +186,25 @@ exports.app = onRequest({ ...HTTP_OPTS, memory: "512MiB", timeoutSeconds: 300 },
       const prompt = String(body.prompt).trim().slice(0, animations.LIMITS.maxPromptLength);
       const id = await s.addAnimation({ name: spec.name, prompt, spec, inIdle: false, createdAt: Date.now() });
       return res.json({ ok: true, animation: { id, name: spec.name, prompt, spec, inIdle: false } });
+    }
+    // ---- schedule ----
+    if (route === "/api/schedule" && (req.method === "GET" || req.method === "POST")) {
+      if (req.method === "POST") {
+        let blocks = null;   // null = back to the original rules
+        if (!body.reset) {
+          try { blocks = schedule.validateBlocks(body.blocks); } catch (e) { return res.status(400).json({ error: e.message }); }
+        }
+        await s.update({ schedule: { blocks } });
+        cachedAt = 0;
+      }
+      const blocks = (await s.get()).schedule.blocks;
+      const now = planFor(new Date(), {}, blocks);
+      return res.json({
+        blocks: blocks || schedule.DEFAULT_BLOCKS,
+        isDefault: !blocks,
+        defaults: schedule.DEFAULT_BLOCKS,
+        now: schedule.describePlan(now),
+      });
     }
     if (req.method === "GET" && route === "/api/assets") {
       const { ASSETS, ASSET_PALETTE } = require("./lib/assets");

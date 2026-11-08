@@ -15,10 +15,18 @@ inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
   return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
 
+// Which screen to draw -- set by the schedule in the cloud ("lay").
+enum Layout : uint8_t {
+  LAYOUT_TWO = 0,   // "LB": L on top, B48 below
+  LAYOUT_L,         // "L":  L train full screen
+  LAYOUT_BUS,       // "B":  B48 full screen
+  LAYOUT_OFF,       // "off": nothing scheduled -- blank
+};
+
 // Latest arrivals from the cloud function (/transit).
 struct TransitData {
   bool valid = false;
-  bool lOnly = false;        // "lay":"L" -> full-screen L train layout (weekends)
+  Layout layout = LAYOUT_TWO;
   char lLabel[6] = "MN";
   int l1 = -1, l2 = -1;
   char bLabel[6] = "SB";

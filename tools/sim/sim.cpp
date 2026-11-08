@@ -66,12 +66,19 @@ int main(int argc, char** argv) {
   TransitData wk;
   wk.valid = true; strcpy(wk.lLabel, "MN"); wk.l1 = 4; wk.l2 = 11;
   strcpy(wk.bLabel, "SB"); wk.b1 = 7; wk.bLive1 = true; wk.b2 = 22; wk.bLive2 = false;
-  TransitData we = wk; we.lOnly = true; we.l1 = 12; we.l2 = 18;
+  TransitData we = wk; we.layout = LAYOUT_L; we.l1 = 12; we.l2 = 18;
 
   int frames = 0;
   if (scene == "weekday") { drawTransit(p, wk); p.dump(f); frames = 1; }
   else if (scene == "weekend") { drawTransit(p, we); p.dump(f); frames = 1; }
   else if (scene == "weekend-ar") { we.l1 = 0; we.l2 = 7; drawTransit(p, we); p.dump(f); frames = 1; }
+  else if (scene == "bus-cases") {        // B48 full screen: live/scheduled mixes
+    TransitData bu = wk; bu.layout = LAYOUT_BUS;
+    int cases[][4] = {{7, 22, 1, 0}, {12, 31, 1, 1}, {0, 9, 1, 0}, {-1, -1, 1, 1}};
+    for (auto& c : cases) { bu.b1 = c[0]; bu.b2 = c[1]; bu.bLive1 = c[2]; bu.bLive2 = c[3]; drawTransit(p, bu); p.dump(f); frames++; }
+    strcpy(bu.bLabel, "NB"); bu.b1 = 4; bu.b2 = 16; bu.bLive1 = false; bu.bLive2 = false; drawTransit(p, bu); p.dump(f); frames++;
+    TransitData off = wk; off.layout = LAYOUT_OFF; drawTransit(p, off); p.dump(f); frames++;
+  }
   else if (scene == "weekend-cases") {   // one frame per tricky combination
     int cases[][2] = {{4, 11}, {12, 19}, {20, 28}, {0, 7}, {3, 0}, {7, -1}, {-1, -1}, {88, 98}};
     for (auto& c : cases) { we.l1 = c[0]; we.l2 = c[1]; drawTransit(p, we); p.dump(f); frames++; }

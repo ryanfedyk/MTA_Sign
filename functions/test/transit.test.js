@@ -4,6 +4,7 @@ const assert = require("node:assert");
 const { call, fakeFeeds } = require("./helpers");
 
 process.env.MTA_BUS_KEY = "test-key";
+require("../lib/store").setStore(require("../lib/settings").memoryStore());
 const { transit } = require("../index.js");
 
 test("weekday: compact two-row payload the ESP32 expects", async () => {

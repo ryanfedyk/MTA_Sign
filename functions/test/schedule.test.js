@@ -48,3 +48,36 @@ test("?dir override forces the bus even on weekends (testing)", () => {
   assert.strictEqual(p.layout, "LB");
   assert.strictEqual(p.b.label, "NB");
 });
+
+const { validateBlocks, describePlan, DEFAULT_BLOCKS } = require("../lib/schedule");
+
+test("custom blocks: first match wins, layouts follow what's on", () => {
+  const blocks = [
+    { days: [6, 0], from: 8 * 60, to: 12 * 60, L: "off", B48: "SB" },     // weekend mornings: bus only
+    { days: [0, 1, 2, 3, 4, 5, 6], from: 23 * 60, to: 6 * 60, L: "off", B48: "off" }, // nights: blank (wraps midnight)
+    { days: [0, 1, 2, 3, 4, 5, 6], from: 0, to: 1440, L: "BK", B48: "NB" },
+  ];
+  assert.deepStrictEqual(planFor(at("2026-11-07T09:00:00-05:00"), {}, blocks).layout, "B");
+  assert.strictEqual(planFor(at("2026-11-07T09:00:00-05:00"), {}, blocks).b.label, "SB");
+  assert.strictEqual(planFor(at("2026-11-04T23:30:00-05:00"), {}, blocks).layout, "off");
+  assert.strictEqual(planFor(at("2026-11-05T03:00:00-05:00"), {}, blocks).layout, "off", "early-morning part of the wrapping block");
+  const p = planFor(at("2026-11-04T14:00:00-05:00"), {}, blocks);
+  assert.strictEqual(p.layout, "LB");
+  assert.deepStrictEqual(p.l, { track: "S", label: "BK" });
+  assert.strictEqual(describePlan(p), "L to Brooklyn + B48 northbound");
+});
+
+test("outside every block: L to Manhattan only", () => {
+  const p = planFor(at("2026-11-04T09:00:00-05:00"), {}, [{ days: [0], from: 0, to: 60, L: "off", B48: "off" }]);
+  assert.strictEqual(p.layout, "L");
+  assert.strictEqual(p.l.label, "MN");
+});
+
+test("validateBlocks cleans input and rejects nonsense", () => {
+  assert.deepStrictEqual(validateBlocks([{ days: [5, "1", 1, 9], from: "60", to: 120, L: "MN", B48: "off" }]),
+    [{ days: [1, 5], from: 60, to: 120, L: "MN", B48: "off" }]);
+  assert.throws(() => validateBlocks([{ days: [], from: 0, to: 60, L: "MN", B48: "off" }]), /no days/);
+  assert.throws(() => validateBlocks([{ days: [1], from: 60, to: 60, L: "MN", B48: "off" }]), /same time/);
+  assert.throws(() => validateBlocks([{ days: [1], from: 0, to: 60, L: "Q", B48: "off" }]), /L must/);
+  assert.strictEqual(validateBlocks(DEFAULT_BLOCKS).length, 5);
+});

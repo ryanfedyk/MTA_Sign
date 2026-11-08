@@ -352,37 +352,25 @@ static const char* directionName(const char* label) {
   return nullptr;
 }
 
-static void drawLOnly(Adafruit_GFX& g, const TransitData& t) {
-  // Geometry
-  const int DISC_X = 2, DISC_Y = 5, DISC_D = 22;          // bullet occupies rows 5..26
-  const int TOP = DISC_Y, BOTTOM = DISC_Y + DISC_D - 1;    // text aligns to these
-  const int TX = DISC_X + DISC_D + 3;                      // text column starts at x = 27
+// Full-screen single-route layout geometry (shared by the L and B48 screens)
+static const int BADGE_X = 2, BADGE_Y = 5, BADGE_D = 22;          // badge occupies rows 5..26
+static const int ROW_TOP = BADGE_Y, ROW_BOTTOM = BADGE_Y + BADGE_D - 1;
 
-  // Bullet: grey disc with a bold L, optically centred (nudged right 1 px
-  // because an L's weight sits on its left side).
-  fillDisc(g, DISC_X, DISC_Y, DISC_D, C_L_GREY);
-  const int lw = (int)strlen(BULLET_L[0]);
-  blit(g, BULLET_L, BULLET_L_H,
-       DISC_X + (DISC_D - lw) / 2 + 1, DISC_Y + (DISC_D - BULLET_L_H) / 2, C_WHITE);
-
-  // Direction, cap height aligned with the top of the bullet
-  const char* name = directionName(t.lLabel);
-  if (name) customText(&g, FACE_SMALL, name, TX, TOP, C_LABEL_SOFT);
-  else printAt(g, TX, TOP, 1, C_LABEL_SOFT, t.lLabel);
-
-  // Times, bottoms aligned with the bottom of the bullet:  "12, 18m"
-  // Big next train, comma, medium following train, and one bold "m" at the
-  // end -- reads as a list of minutes (not 12:18), like a countdown clock.
+// Times on the badge's bottom edge:  "12, 18m"
+// Big next arrival, comma, medium following arrival, and one bold "m" at the
+// end -- reads as a list of minutes (not 12:18), like a countdown clock.
+static void drawBigTimes(Adafruit_GFX& g, int TX, int t1, int t2, uint16_t c1, uint16_t c2) {
+  const int BOTTOM = ROW_BOTTOM;
   const int bigY = BOTTOM - BIG_H + 1;     // rows 13..26
   const int medY = BOTTOM - MED_H + 1;     // rows 19..26
 
-  if (t.l1 < 0) { customText(&g, FACE_BIG, "--", TX, bigY, C_DIM); return; }
+  if (t1 < 0) { customText(&g, FACE_BIG, "--", TX, bigY, C_DIM); return; }
 
   char a[12], b[12];
-  if (t.l1 == 0) snprintf(a, sizeof a, "AR"); else snprintf(a, sizeof a, "%d", t.l1);
-  if (t.l2 == 0) snprintf(b, sizeof b, "AR"); else snprintf(b, sizeof b, "%d", t.l2);
-  bool hasSecond = t.l2 >= 0;
-  auto lastIsMinutes = [&]() { return hasSecond ? t.l2 > 0 : t.l1 > 0; };
+  if (t1 == 0) snprintf(a, sizeof a, "AR"); else snprintf(a, sizeof a, "%d", t1);
+  if (t2 == 0) snprintf(b, sizeof b, "AR"); else snprintf(b, sizeof b, "%d", t2);
+  bool hasSecond = t2 >= 0;
+  auto lastIsMinutes = [&]() { return hasSecond ? t2 > 0 : t1 > 0; };
   bool unit = lastIsMinutes();
 
   static const char* const COMMA[4] = {"##", "##", ".#", "#."};   // sits on the baseline, tail dips below
@@ -391,26 +379,63 @@ static void drawLOnly(Adafruit_GFX& g, const TransitData& t) {
   auto total = [&]() {
     return TX + textWidth(FACE_BIG, a, bigGap) + (hasSecond ? cg + 2 + cg + textWidth(FACE_MED, b) : 0) + (unit ? unitW : 0);
   };
-  // Fit to 64 px: tighten spacing, then drop the "m", then the following train.
+  // Fit to 64 px: tighten spacing, then drop the "m", then the following arrival.
   if (total() > SCREEN_W) cg = 1;
   if (total() > SCREEN_W) bigGap = 1;
   if (total() > SCREEN_W) unit = false;
   if (total() > SCREEN_W) { hasSecond = false; unit = lastIsMinutes(); }
   if (total() > SCREEN_W) unit = false;
 
-  int x = TX + customText(&g, FACE_BIG, a, TX, bigY, C_AMBER, bigGap);
+  int x = TX + customText(&g, FACE_BIG, a, TX, bigY, c1, bigGap);
   if (hasSecond) {
-    blit(g, COMMA, 4, x + cg, BOTTOM - 2, C_AMBER_2ND);
+    blit(g, COMMA, 4, x + cg, BOTTOM - 2, c2);
     x += cg + 2 + cg;
-    x += customText(&g, FACE_MED, b, x, medY, C_AMBER_2ND);
+    x += customText(&g, FACE_MED, b, x, medY, c2);
   }
-  if (unit) customText(&g, FACE_MED, "m", x + 1, medY, hasSecond ? C_AMBER_2ND : C_AMBER);
+  if (unit) customText(&g, FACE_MED, "m", x + 1, medY, hasSecond ? c2 : c1);
+}
+
+static void drawLOnly(Adafruit_GFX& g, const TransitData& t) {
+  const int TX = BADGE_X + BADGE_D + 3;                    // text column starts at x = 27
+
+  // Bullet: grey disc with a bold L, optically centred (nudged right 1 px
+  // because an L's weight sits on its left side).
+  fillDisc(g, BADGE_X, BADGE_Y, BADGE_D, C_L_GREY);
+  const int lw = (int)strlen(BULLET_L[0]);
+  blit(g, BULLET_L, BULLET_L_H,
+       BADGE_X + (BADGE_D - lw) / 2 + 1, BADGE_Y + (BADGE_D - BULLET_L_H) / 2, C_WHITE);
+
+  // Direction, cap height aligned with the top of the bullet
+  const char* name = directionName(t.lLabel);
+  if (name) customText(&g, FACE_SMALL, name, TX, ROW_TOP, C_LABEL_SOFT);
+  else printAt(g, TX, ROW_TOP, 1, C_LABEL_SOFT, t.lLabel);
+
+  drawBigTimes(g, TX, t.l1, t.l2, C_AMBER, C_AMBER_2ND);    // subway times are always live
+}
+
+// Full-screen B48: blue rounded-square badge, "Northbound"/"Southbound",
+// amber = live GPS, white = scheduled.
+static void drawBusOnly(Adafruit_GFX& g, const TransitData& t) {
+  const int TX = BADGE_X + BADGE_D + 1;                    // x = 25 ("Northbound"/"Southbound" are 38 px wide)
+  g.fillRoundRect(BADGE_X, BADGE_Y, BADGE_D, BADGE_D, 5, C_B_BLUE);
+  const int bw = textWidth(FACE_MED, "B48");
+  customText(&g, FACE_MED, "B48", BADGE_X + (BADGE_D - bw) / 2 + 1, BADGE_Y + (BADGE_D - MED_H) / 2, C_WHITE);
+
+  const char* name = !strcmp(t.bLabel, "NB") ? "Northbound" : !strcmp(t.bLabel, "SB") ? "Southbound" : nullptr;
+  if (name) customText(&g, FACE_SMALL, name, TX, ROW_TOP, C_LABEL_SOFT);
+  else printAt(g, TX, ROW_TOP, 1, C_LABEL_SOFT, t.bLabel);
+
+  drawBigTimes(g, TX, t.b1, t.b2, t.bLive1 ? C_AMBER : C_WHITE, t.bLive2 ? C_AMBER_2ND : rgb565(220, 220, 220));
 }
 
 void drawTransit(Adafruit_GFX& g, const TransitData& t) {
   g.fillScreen(C_BLACK);
-  if (t.lOnly) drawLOnly(g, t);
-  else drawTwoRow(g, t);
+  switch (t.layout) {
+    case LAYOUT_L:   drawLOnly(g, t); break;
+    case LAYOUT_BUS: drawBusOnly(g, t); break;
+    case LAYOUT_OFF: break;                       // blank sign (idle animations still play)
+    default:         drawTwoRow(g, t); break;
+  }
 }
 
 // ---------------------------------------------------------------------------

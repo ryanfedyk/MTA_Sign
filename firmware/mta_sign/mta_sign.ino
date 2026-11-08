@@ -192,7 +192,8 @@ static void fetchTransit() {
 
   TransitData t;
   t.valid = true;
-  t.lOnly = strcmp(doc["lay"] | "LB", "L") == 0;
+  const char* lay = doc["lay"] | "LB";
+  t.layout = !strcmp(lay, "L") ? LAYOUT_L : !strcmp(lay, "B") ? LAYOUT_BUS : !strcmp(lay, "off") ? LAYOUT_OFF : LAYOUT_TWO;
   copyStr(t.lLabel, sizeof t.lLabel, doc["l"]["dir"] | "MN");
   t.l1 = doc["l"]["t1"] | -1;
   t.l2 = doc["l"]["t2"] | -1;
@@ -205,7 +206,7 @@ static void fetchTransit() {
   xSemaphoreTake(gLock, portMAX_DELAY);
   gTransit = t;
   xSemaphoreGive(gLock);
-  Serial.printf("[net] transit ok: lay=%s L %d,%d  B %d,%d\n", t.lOnly ? "L" : "LB", t.l1, t.l2, t.b1, t.b2);
+  Serial.printf("[net] transit ok: lay=%s L %d,%d  B %d,%d\n", lay, t.l1, t.l2, t.b1, t.b2);
 }
 
 // ---- cloud animation library ----

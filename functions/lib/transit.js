@@ -100,7 +100,7 @@ async function buildArrivals(plan, { busKey, now = new Date(), debug = false } =
   const wantBus = Boolean(plan.b) && Boolean(busKey);
 
   const [lRes, obaRes, siriRes] = await Promise.allSettled([
-    getJson(L_FEED),
+    plan.l ? getJson(L_FEED) : Promise.resolve(null),
     wantBus
       ? getJson(`https://bustime.mta.info/api/where/arrivals-and-departures-for-stop/MTA_${plan.b.stop}.json?key=${busKey}&minutesAfter=120`)
       : Promise.resolve(null),
@@ -110,13 +110,13 @@ async function buildArrivals(plan, { busKey, now = new Date(), debug = false } =
   ]);
   const value = (r) => (r.status === "fulfilled" ? r.value : null);
 
-  const l = parseL(value(lRes), plan.l.track, nowMs);
+  const l = plan.l ? parseL(value(lRes), plan.l.track, nowMs) : { t1: -1, t2: -1 };
   const bus = parseBus(value(obaRes), value(siriRes), nowMs);
   const a = bus.arrivals;
 
   const response = {
     lay: plan.layout,
-    l: { dir: plan.l.label, t1: l.t1, t2: l.t2 },
+    l: { dir: plan.l ? plan.l.label : "", t1: l.t1, t2: l.t2 },
     // Always present (blank on weekends) so older firmware never misreads it.
     b: {
       dir: plan.b ? plan.b.label : "",

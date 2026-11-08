@@ -37,6 +37,7 @@ function withDefaults(data = {}) {
     msg: data.msg || null,
     device: data.device || null,
     lib: { v: (data.lib && data.lib.v) || 0 },
+    schedule: { blocks: (data.schedule && Array.isArray(data.schedule.blocks)) ? data.schedule.blocks : null },
   };
 }
 

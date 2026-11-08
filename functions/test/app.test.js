@@ -85,3 +85,34 @@ test("/sign records the firmware version the sign reports, and the app shows it"
   const r = await call(app, { path: "/api/settings", headers: PIN });
   assert.strictEqual(r.body.firmware, 17);
 });
+
+test("schedule: app saves blocks, /transit follows them, reset restores the original rules", async () => {
+  const store = settings.memoryStore();
+  setStore(store);
+  const { transit } = require("../index.js");
+  const { fakeFeeds } = require("./helpers");
+  global.fetch = fakeFeeds(Date.now());
+
+  let r = await call(app, { path: "/api/schedule", headers: PIN });
+  assert.strictEqual(r.body.isDefault, true);
+  assert.strictEqual(r.body.blocks.length, 5);
+
+  const blocks = [{ days: [0, 1, 2, 3, 4, 5, 6], from: 0, to: 1440, L: "off", B48: "NB" }];
+  r = await call(app, { method: "POST", path: "/api/schedule", headers: PIN, body: { blocks } });
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.body.isDefault, false);
+  assert.strictEqual(r.body.now, "B48 northbound");
+
+  r = await call(transit, { query: { at: "2026-11-04T09:00:00-05:00" } });
+  assert.strictEqual(r.body.lay, "B");
+  assert.strictEqual(r.body.l.t1, -1);
+  assert.strictEqual(r.body.b.dir, "NB");
+
+  r = await call(app, { method: "POST", path: "/api/schedule", headers: PIN, body: { blocks: [{ days: [], from: 0, to: 5 }] } });
+  assert.strictEqual(r.status, 400);
+
+  r = await call(app, { method: "POST", path: "/api/schedule", headers: PIN, body: { reset: true } });
+  assert.strictEqual(r.body.isDefault, true);
+  r = await call(transit, { query: { at: "2026-11-04T09:00:00-05:00" } });
+  assert.strictEqual(r.body.lay, "LB");
+});

@@ -18,7 +18,26 @@ MTA feeds ──► Firebase cloud functions ──► ESP32-S3 LED matrix
 | `tools/sim/` | Preview tool that renders the sign's real drawing code to GIFs |
 | `.github/workflows/` | Automatic tests, firmware builds, and cloud deploys |
 
+## Schedule (editable in the app)
+
+The **Schedule** card in the control panel lists time blocks. Each block has days, a
+start and end time, and a setting for each route: the L (Manhattan, Brooklyn, or off)
+and the B48 (northbound, southbound, or off). Blocks are checked top to bottom, and the
+first match wins. Outside every block, the sign shows the L to Manhattan.
+
+The screen layout follows the routes that are on:
+
+| Routes on | Layout |
+| --- | --- |
+| Both | Two rows |
+| One | That route fills the screen |
+| None | Blank sign (idle animations still play) |
+
+**Reset to original** restores the rules below.
+
 ## What the sign shows
+
+Original rules (the default schedule):
 
 **Weekdays** (New York time)
 - **L train:** Brooklyn-bound (BK) from 4–7 PM; Manhattan-bound (MN) at all other times.
@@ -222,6 +241,4 @@ cd functions && npm ci && npm test        # cloud tests
 tools/sim/build_previews.sh previews      # GIF previews of every screen (needs g++, python3 + Pillow)
 ```
 
-### Ideas for later
 
-- Turning routes on and off, and editing the schedule from the control panel.
