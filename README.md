@@ -62,9 +62,13 @@ There are three cats:
 | Yarn chase (`chase`) | A ball of yarn rolls by, and the cat sprints after it |
 | Peek-a-boo (`peek`) | A cat face rises from the bottom, blinks, and ducks back down |
 
-## Control panel
+## Control panel: Headway
 
 **https://us-central1-mta-transit-matrix.cloudfunctions.net/app**
+
+The phone app is called **Headway**, after the transit term for the time between
+trains. It has three tabs: **Sign** (live preview, messages, play now), **Animations**
+(library, create, idle), and **Settings** (brightness, schedule, sign info).
 
 Open it on your phone. In Safari you can tap Share → "Add to Home Screen" to make it feel like an app.
 From the panel you can:

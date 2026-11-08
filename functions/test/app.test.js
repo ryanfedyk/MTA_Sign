@@ -14,7 +14,7 @@ test("serves the control panel page without a passphrase", async () => {
   const { status, body, headers } = await call(app, { path: "/" });
   assert.strictEqual(status, 200);
   assert.match(headers["content-type"], /text\/html/);
-  assert.match(body, /Lorimer Sign/);
+  assert.match(body, /Headway/);
 });
 
 test("API refuses a wrong passphrase", async () => {
