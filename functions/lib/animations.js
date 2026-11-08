@@ -242,7 +242,22 @@ function extractJson(text) {
   return JSON.parse(t.slice(start, end + 1));
 }
 
-async function callGemini({ apiKey, model, contents, fetchImpl = fetch, timeoutMs = 240000, lowThinking = true }) {
+// Gemini sometimes answers "high demand" / rate limited for a few seconds:
+// wait and try again before giving up.
+async function callGemini(opts) {
+  const waits = opts.retryWaits ?? [3000, 8000, 15000];
+  for (let i = 0; ; i++) {
+    try {
+      return await callGeminiOnce(opts);
+    } catch (e) {
+      const busy = e.status === 429 || e.status === 503 || /high demand|overloaded|try again later/i.test(e.message);
+      if (!busy || i >= waits.length) throw e;
+      await new Promise((r) => setTimeout(r, waits[i]));
+    }
+  }
+}
+
+async function callGeminiOnce({ apiKey, model, contents, fetchImpl = fetch, timeoutMs = 240000, lowThinking = true }) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
   try {
@@ -269,7 +284,7 @@ async function callGemini({ apiKey, model, contents, fetchImpl = fetch, timeoutM
       const msg = body?.error?.message || `HTTP ${res.status}`;
       // Older/other models may not accept thinkingLevel: retry once without it.
       if (lowThinking && res.status === 400 && /thinking/i.test(msg)) {
-        return callGemini({ apiKey, model, contents, fetchImpl, timeoutMs, lowThinking: false });
+        return callGeminiOnce({ apiKey, model, contents, fetchImpl, timeoutMs, lowThinking: false });
       }
       const err = new Error(`Gemini error: ${msg}`);
       err.status = res.status;
@@ -291,7 +306,7 @@ async function callGemini({ apiKey, model, contents, fetchImpl = fetch, timeoutM
  * Ask Gemini for an animation. Retries once, telling Gemini what was wrong,
  * if the first answer can't be used.
  */
-async function generateAnimation(prompt, { apiKey, model = "gemini-3.8-flash", fetchImpl = fetch } = {}) {
+async function generateAnimation(prompt, { apiKey, model = "gemini-3.8-flash", fetchImpl = fetch, retryWaits } = {}) {
   if (!apiKey) throw new Error("Gemini isn't set up yet (add the GEMINI_API_KEY secret and redeploy).");
   const request = String(prompt || "").trim().slice(0, LIMITS.maxPromptLength);
   if (!request) throw new Error("Describe the animation you want");
@@ -299,7 +314,7 @@ async function generateAnimation(prompt, { apiKey, model = "gemini-3.8-flash", f
   const contents = [{ role: "user", parts: [{ text: request }] }];
   let lastErr;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const text = await callGemini({ apiKey, model, contents, fetchImpl });
+    const text = await callGemini({ apiKey, model, contents, fetchImpl, retryWaits });
     try {
       return normalizeSpec(extractJson(text));
     } catch (e) {

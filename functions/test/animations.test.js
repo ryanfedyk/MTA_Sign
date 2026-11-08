@@ -99,7 +99,7 @@ test("generateAnimation asks Gemini and retries once with the problem", async ()
 
 test("generateAnimation explains missing setup and Gemini errors", async () => {
   await assert.rejects(anim.generateAnimation("x", {}), /GEMINI_API_KEY/);
-  const fetchImpl = async () => ({ ok: false, status: 429, json: async () => ({ error: { message: "quota" } }) });
+  const fetchImpl = async () => ({ ok: false, status: 400, json: async () => ({ error: { message: "quota" } }) });
   await assert.rejects(anim.generateAnimation("x", { apiKey: "k", fetchImpl }), /quota/);
 });
 
@@ -177,4 +177,16 @@ test("app: create (no AI) saves builder / image animations; assets are served", 
   assert.strictEqual(r.status, 400);
   const lib = await call(anims);
   assert.strictEqual(lib.body.a[0].img, img);
+});
+
+test("busy Gemini (503 / high demand) is retried automatically", async () => {
+  let n = 0;
+  const fetchImpl = async () => {
+    n++;
+    if (n < 3) return { ok: false, status: 503, json: async () => ({ error: { message: "This model is currently experiencing high demand." } }) };
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(anim.EXAMPLE) }] } }] }) };
+  };
+  const spec = await anim.generateAnimation("cat", { apiKey: "k", fetchImpl, retryWaits: [1, 1, 1] });
+  assert.strictEqual(n, 3);
+  assert.ok(spec.actors.length);
 });
