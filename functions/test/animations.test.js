@@ -9,10 +9,35 @@ process.env.SIGN_APP_PIN = "purple cat 42";
 const PIN = { "x-sign-pin": "purple cat 42" };
 const { app, anims, sign } = require("../index.js");
 
-test("the built-in example is a valid spec", () => {
+test("the built-in example is a valid spec built from library sprites", () => {
   const s = anim.normalizeSpec(anim.EXAMPLE);
-  assert.strictEqual(s.sprites[0].frames[0][0].length, 16);
-  assert.strictEqual(s.actors[0].keyframes.length, 2);
+  assert.strictEqual(s.sprites[1].frames[0][0].length, 16);    // cat_run
+  assert.strictEqual(s.actors[0].keyframes.length, 5);
+});
+
+test("asset sprites expand with merged colors, re-lettering conflicts", () => {
+  const s = anim.normalizeSpec({
+    palette: { o: "#00ff00", r: "#ff2828" },              // 'o' clashes with the cat's orange; red matches
+    sprites: [{ asset: "cat_walk" }, { asset: "laser" }, { frames: [["oo"]] }],
+    actors: [{ sprite: 0, keyframes: [{ t: 0, x: 0, y: 0 }] }],
+  });
+  assert.strictEqual(s.palette.o, "#00ff00");
+  const catChars = new Set(s.sprites[0].frames.flat().join("").replace(/\./g, ""));
+  assert.ok(!catChars.has("o"), "cat orange was re-lettered");
+  assert.ok([...catChars].every((c) => s.palette[c]));
+  assert.ok(s.sprites[1].frames[0].join("").includes("r"), "laser reuses the matching red");
+  assert.throws(() => anim.normalizeSpec({ palette: { o: "#fff" }, sprites: [{ asset: "dragon" }], actors: [] }), /unknown asset/);
+});
+
+test("image-only specs are accepted and encoded for the sign", () => {
+  const img = Buffer.alloc(64 * 32, 0xe0).toString("base64");   // all red
+  const s = anim.normalizeSpec({ name: "Photo", duration_ms: 8000, image: { rgb332: img } });
+  assert.strictEqual(s.background, "black");
+  assert.strictEqual(s.image.rgb332, img);
+  const d = anim.toDevice(s, "x");
+  assert.strictEqual(d.img, img);
+  assert.deepStrictEqual(d.s, []);
+  assert.throws(() => anim.normalizeSpec({ image: { rgb332: "AAAA" } }), /64x32/);
 });
 
 test("normalizeSpec repairs ragged rows, unknown colors and out-of-range numbers", () => {
@@ -43,13 +68,13 @@ test("normalizeSpec rejects unusable answers with a helpful reason", () => {
 test("device format uses palette indexes and stays compact", () => {
   const s = anim.normalizeSpec(anim.EXAMPLE);
   const d = anim.toDevice(s, "abc", { idle: true });
-  assert.strictEqual(d.p.length, 5);
-  assert.strictEqual(d.p[0], "ff7d0f");
-  assert.strictEqual(d.s[0].fr[0].length, 16 * 11);
-  assert.match(d.s[0].fr[0], /^[.0-4]+$/);
-  assert.deepStrictEqual(d.a[0].k[1], [4400, 64, 21, 0]);
+  assert.strictEqual(d.p.length, Object.keys(s.palette).length);
+  assert.strictEqual(d.p[0], "ff2828");
+  assert.strictEqual(d.s[1].fr[0].length, 16 * 11);
+  assert.match(d.s[1].fr[0], /^[.0-9a-e]+$/);
+  assert.deepStrictEqual(d.a[0].k[1], [600, 40, 28, 0]);
   assert.strictEqual(d.i, 1);
-  assert.ok(JSON.stringify(d).length < 1000);
+  assert.ok(JSON.stringify(d).length < 2500);
 });
 
 function fakeGemini(answers, seen = []) {
@@ -64,7 +89,7 @@ test("generateAnimation asks Gemini and retries once with the problem", async ()
   const seen = [];
   const fetchImpl = fakeGemini(["```json\n{\"oops\": true}\n```", JSON.stringify(anim.EXAMPLE)], seen);
   const spec = await anim.generateAnimation("a cat walks", { apiKey: "k", model: "m1", fetchImpl });
-  assert.strictEqual(spec.name, "Orange cat strolls by");
+  assert.strictEqual(spec.name, "Cat chases a laser dot");
   assert.strictEqual(seen.length, 2);
   assert.match(seen[0].url, /models\/m1:generateContent$/);
   assert.strictEqual(seen[0].key, "k");
@@ -137,4 +162,19 @@ test("Gemini is asked for low thinking, and retried without it if the model refu
   assert.ok(spec.sprites.length);
   assert.deepStrictEqual(bodies[0].generationConfig.thinkingConfig, { thinkingLevel: "low" });
   assert.strictEqual(bodies[1].generationConfig.thinkingConfig, undefined);
+});
+
+test("app: create (no AI) saves builder / image animations; assets are served", async () => {
+  setStore(settings.memoryStore());
+  let r = await call(app, { path: "/api/assets", headers: PIN });
+  assert.ok(r.body.assets.cat_walk.frames.length === 4);
+  const img = Buffer.alloc(64 * 32, 0x1c).toString("base64");
+  r = await call(app, { method: "POST", path: "/api/animations/create", headers: PIN,
+    body: { name: "Beach photo", source: "image", spec: { duration_ms: 10000, image: { rgb332: img } } } });
+  assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+  assert.strictEqual(r.body.animation.name, "Beach photo");
+  r = await call(app, { method: "POST", path: "/api/animations/create", headers: PIN, body: { spec: { sprites: [] } } });
+  assert.strictEqual(r.status, 400);
+  const lib = await call(anims);
+  assert.strictEqual(lib.body.a[0].img, img);
 });

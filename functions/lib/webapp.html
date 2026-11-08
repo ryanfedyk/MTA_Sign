@@ -43,7 +43,7 @@
   .led.big .dname { color: #c8c8cd; font-size: 15px; letter-spacing: .02em; }
   .led.big .times { margin: 2px 0 0; line-height: 1; }
   .led.big .unit { color: #be8223; font-size: 16px; margin-left: 2px; }
-  .led.big .second { color: #be8223; font-size: 16px; margin-left: 14px; }
+  .led.big .second { color: #e6a028; font-size: 20px; margin-left: 2px; }
   .legend { margin-top: 10px; font-size: 12px; color: var(--muted); display: flex; gap: 14px; }
   .legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
   .legend .a::before { background: var(--amber); } .legend .w::before { background: #fff; }
@@ -90,6 +90,16 @@
   .tile .acts button.on { background: var(--orange); border-color: var(--orange); color: #1b0e03; font-weight: 600; }
   .note { font-size: 13px; color: var(--muted); }
   .empty { font-size: 14px; color: var(--muted); text-align: center; padding: 14px 0 4px; }
+
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .tabs button { flex: 1; background: var(--card2); border: 1px solid var(--line); color: var(--muted); border-radius: 10px; padding: 10px; font: inherit; font-size: 15px; cursor: pointer; }
+  .tabs button.sel { background: var(--text); color: var(--bg); font-weight: 650; }
+  .lbl { font-size: 13px; color: var(--muted); margin: 12px 2px 6px; }
+  .seg.wrap { flex-wrap: wrap; }
+  .seg.wrap button { flex: 1 0 30%; }
+  input.txt { width: 100%; background: var(--card2); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 11px 13px; font: inherit; font-size: 16px; outline: none; }
+  .filebtn { display: block; text-align: center; border: 1px dashed var(--line); border-radius: 12px; padding: 18px; color: var(--muted); cursor: pointer; }
+  .filebtn input { display: none; }
 
   /* toggle */
   .switch { position: relative; width: 50px; height: 30px; flex: none; }
@@ -159,6 +169,39 @@
     <section class="card">
       <h2>Play a cat</h2>
       <div class="cats" id="cats"></div>
+    </section>
+
+    <section class="card" id="makeCard">
+      <h2>Make your own</h2>
+      <div class="tabs" id="makeTabs"><button data-v="quick" class="sel">Quick animation</button><button data-v="image">Upload image</button></div>
+
+      <div id="quickPane">
+        <div class="lbl">Character</div>
+        <div class="seg wrap" id="qChar"></div>
+        <div class="lbl">Motion</div>
+        <div class="seg wrap" id="qMove"></div>
+        <div class="lbl">Chasing</div>
+        <div class="seg wrap" id="qFriend"></div>
+        <div class="lbl">Direction · Speed · Row</div>
+        <div class="seg" id="qDir"><button data-v="right" class="sel">→</button><button data-v="left">←</button></div>
+        <div class="seg" id="qSpeed" style="margin-top:6px"><button data-v="12">Slow</button><button data-v="20" class="sel">Normal</button><button data-v="34">Fast</button></div>
+        <div class="seg" id="qRow" style="margin-top:6px"><button data-v="bottom" class="sel">Bottom</button><button data-v="middle">Middle</button><button data-v="top">Top</button></div>
+        <div class="lbl">Background</div>
+        <div class="seg wrap" id="qBg"></div>
+      </div>
+
+      <div id="imagePane" class="hidden">
+        <label class="filebtn">Choose a photo…<input type="file" id="imgFile" accept="image/*"></label>
+        <div class="lbl">Framing</div>
+        <div class="seg" id="imgFit"><button data-v="cover" class="sel">Fill (crop)</button><button data-v="contain">Fit whole image</button></div>
+        <div class="lbl">Show for</div>
+        <div class="seg" id="imgDur"><button data-v="5000">5 s</button><button data-v="10000" class="sel">10 s</button><button data-v="15000">15 s</button></div>
+      </div>
+
+      <canvas class="ledcv" id="makeCv" width="650" height="330" style="margin-top:14px"></canvas>
+      <div class="lbl">Name</div>
+      <input class="txt" id="makeName" maxlength="40">
+      <button class="btn" id="makeSave">Save to my animations</button>
     </section>
 
     <section class="card" id="createCard">
@@ -405,8 +448,8 @@ async function refreshPreview() {
       led.innerHTML = `<div class="row"><div class="badge l">L</div><div>
         <div class="dname">${names[d.l.dir] || d.l.dir}</div>
         <div class="times">${d.l.t1 < 0 ? '<span class="none">– –</span>'
-          : `<span class="live">${t(d.l.t1)}</span>${unit(d.l.t1)}${d.l.t2 >= 0
-            ? `<small class="second">${t(d.l.t2)}${d.l.t2 > 0 ? "m" : ""}</small>` : ""}`}</div></div></div>`;
+          : `<span class="live">${t(d.l.t1)}</span>${d.l.t2 >= 0
+            ? `<small class="second">, ${t(d.l.t2)}${d.l.t2 > 0 ? "m" : ""}</small>` : unit(d.l.t1)}`}</div></div></div>`;
     } else {
       led.className = "led";
       led.innerHTML =
@@ -438,10 +481,20 @@ const BACKDROP = (() => {
   return d;
 })();
 
+function imageBytes(spec) {
+  if (!spec.image) return null;
+  if (!spec._bytes) spec._bytes = Uint8Array.from(atob(spec.image.rgb332), (c) => c.charCodeAt(0));
+  return spec._bytes;
+}
 function renderSpec(spec, ms) {
   const img = new ImageData(W, H);
-  if (spec.background !== "black") img.data.set(BACKDROP.data);
+  if (spec.background !== "black" && !spec.image) img.data.set(BACKDROP.data);
   for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;
+  const bytes = imageBytes(spec);
+  if (bytes) for (let p = 0; p < W * H; p++) {
+    const v = bytes[p], i = p * 4;
+    img.data[i] = Math.round((v >> 5) * 255 / 7); img.data[i + 1] = Math.round(((v >> 2) & 7) * 255 / 7); img.data[i + 2] = (v & 3) * 85;
+  }
   const put = (x, y, rgb) => {
     if (x < 0 || y < 0 || x >= W || y >= H) return;
     const i = (y * W + x) * 4; img.data[i] = rgb[0]; img.data[i + 1] = rgb[1]; img.data[i + 2] = rgb[2];
@@ -544,6 +597,7 @@ async function loadLib() {
   const d = await api("animations");
   LIB = d.animations || [];
   renderLib();
+  if (!ASSETS) initMake().catch(() => {});
   $("gen").disabled = !d.geminiReady;
   $("genNote").textContent = d.geminiReady ? "" : "Gemini isn't connected yet: add the GEMINI_API_KEY secret in GitHub and re-run the deploy.";
 }
@@ -587,6 +641,166 @@ $("gen").onclick = async () => {
   } finally {
     btn.disabled = false; btn.textContent = "Create animation";
   }
+};
+
+// ---- make your own: quick animation builder + image upload (no AI) ----
+let ASSETS = null, ASSET_PAL = null;
+const CHARS = [
+  ["cat_walk", "Walking cat"], ["cat_run", "Running cat"], ["cat_sit", "Sitting cat"], ["cat_sleep", "Sleeping cat"],
+  ["cat_face", "Peeking cat"], ["mouse", "Mouse"], ["bird", "Bird"], ["butterfly", "Butterfly"], ["heart", "Heart"],
+];
+const MOVES = [["across", "Across"], ["back", "There & back"], ["hop", "Hop across"], ["visit", "Stop & sit"], ["peek", "Peek up"], ["stay", "Stay put"]];
+const FRIENDS = [["none", "Nothing"], ["yarn", "Yarn"], ["mouse", "Mouse"], ["laser", "Laser"], ["butterfly", "Butterfly"]];
+const Q = { char: "cat_walk", move: "across", friend: "none", dir: "right", speed: 20, row: "bottom", bg: "transit" };
+let makeTab = "quick", makeSpec = null, makePlayer = null, imgSpec = null, nameTouched = false;
+
+function fillSeg(id, items, key) {
+  const el = $(id); el.innerHTML = "";
+  for (const [v, label] of items) {
+    const b = document.createElement("button"); b.dataset.v = v; b.textContent = label;
+    if (String(Q[key]) === v) b.classList.add("sel");
+    el.appendChild(b);
+  }
+}
+function bindSeg(id, key, num) {
+  $(id).onclick = (e) => { const v = e.target.dataset.v; if (!v) return; Q[key] = num ? Number(v) : v; seg(id, v); updateQuick(); };
+}
+
+function sizeOf(id) { const f = ASSETS[id].frames[0]; return [f[0].length, f.length]; }
+function rowY(h, row) { return row === "top" ? 1 : row === "middle" ? Math.round((32 - h) / 2) : 32 - h; }
+
+// Builds a spec from the builder choices: sprites come straight from the library.
+function buildQuick() {
+  const sprites = [], actors = [];
+  const add = (asset) => { sprites.push({ asset }); return sprites.length - 1; };
+  const [w, h] = sizeOf(Q.char);
+  const right = Q.dir === "right", y = rowY(h, Q.row), speed = Q.speed;
+  const startX = right ? -w : 64, endX = right ? 64 : -w;
+  const crossMs = Math.round((64 + w) / speed * 1000);
+  const flip = !right;
+  let duration = crossMs;
+  const main = add(Q.char);
+  let keys;
+
+  if (Q.move === "across") keys = [{ t: 0, x: startX, y, flip }, { t: crossMs, x: endX, y, flip }];
+  else if (Q.move === "back") {
+    duration = crossMs * 2;
+    keys = [{ t: 0, x: startX, y, flip }, { t: crossMs, x: endX, y, flip }, { t: crossMs + 1, x: endX, y, flip: !flip }, { t: duration, x: startX, y, flip: !flip }];
+  } else if (Q.move === "hop") {
+    keys = []; const hops = Math.max(3, Math.round(crossMs / 450));
+    for (let i = 0; i <= hops * 2; i++) {
+      const f = i / (hops * 2);
+      keys.push({ t: Math.round(f * crossMs), x: Math.round(startX + (endX - startX) * f), y: i % 2 ? Math.max(0, y - 5) : y, flip });
+    }
+  } else if (Q.move === "visit") {
+    const mid = Math.round((64 - w) / 2), half = Math.round(crossMs / 2), pause = 2500;
+    duration = crossMs + pause;
+    keys = [{ t: 0, x: startX, y, flip }, { t: half, x: mid, y, flip }];
+    const sitAsset = Q.char.startsWith("cat_") && Q.char !== "cat_face" ? "cat_sit" : Q.char;
+    const sit = add(sitAsset); const [sw, sh] = sizeOf(sitAsset);
+    actors.push({ sprite: sit, outline: true, keyframes: [{ t: half + 1, x: mid + Math.round((w - sw) / 2), y: rowY(sh, Q.row), flip }, { t: half + pause, x: mid + Math.round((w - sw) / 2), y: rowY(sh, Q.row), flip }] });
+    actors.push({ sprite: main, outline: true, keyframes: [{ t: half + pause + 1, x: mid, y, flip }, { t: duration, x: endX, y, flip }] });
+  } else if (Q.move === "peek") {
+    const x = Math.round((64 - w) / 2), top = 32 - h;
+    duration = 4000;
+    keys = [{ t: 0, x, y: 32 }, { t: 700, x, y: top }, { t: 3300, x, y: top }, { t: 4000, x, y: 32 }];
+  } else {
+    const x = Math.round((64 - w) / 2); duration = 5000;
+    keys = [{ t: 0, x, y, flip }, { t: duration, x, y, flip }];
+  }
+  actors.unshift({ sprite: main, outline: true, keyframes: keys });
+
+  // Something to chase: runs ahead of the character along the same path.
+  if (Q.friend !== "none" && ["across", "back", "hop", "visit"].includes(Q.move)) {
+    const fr = add(Q.friend); const [fw, fh] = sizeOf(Q.friend);
+    const fy = Q.friend === "butterfly" ? Math.max(1, y - 6) : 32 - fh - (Q.friend === "laser" ? 2 : 0);
+    const lead = 22, fStart = right ? startX + w + lead - fw : startX - lead, fEnd = right ? 64 + lead : -fw - lead;
+    actors.push({ sprite: fr, outline: Q.friend !== "laser", keyframes: [{ t: 0, x: fStart, y: fy, flip }, { t: crossMs, x: fEnd, y: fy, flip }] });
+  }
+
+  const bgImage = Q.bg.startsWith("img:") ? LIB.find((a) => a.id === Q.bg.slice(4))?.spec?.image : null;
+  return {
+    name: `${CHARS.find((c) => c[0] === Q.char)[1]}${Q.friend !== "none" ? " & " + FRIENDS.find((f) => f[0] === Q.friend)[1].toLowerCase() : ""}`,
+    duration_ms: Math.min(15000, duration),
+    background: bgImage ? "black" : Q.bg,
+    palette: {}, sprites, actors, ...(bgImage ? { image: bgImage } : {}),
+  };
+}
+
+// Same palette expansion the cloud does, so the preview matches exactly.
+function expand(spec) {
+  const palette = { ...ASSET_PAL };
+  const sprites = spec.sprites.map((sp) => sp.asset ? { name: sp.asset, frame_ms: ASSETS[sp.asset].frame_ms, frames: ASSETS[sp.asset].frames } : sp);
+  return { ...spec, palette, sprites };
+}
+
+function showMake(spec) {
+  makeSpec = spec;
+  if (makePlayer) players.delete(makePlayer);
+  makePlayer = spec ? addPlayer($("makeCv"), makeTab === "quick" ? expand(spec) : spec, true) : null;
+  if (!nameTouched && spec) $("makeName").value = spec.name;
+}
+function updateQuick() { if (ASSETS) showMake(buildQuick()); }
+
+async function initMake() {
+  if (!ASSETS) {
+    const d = await api("assets");
+    ASSETS = d.assets; ASSET_PAL = d.palette;
+    fillSeg("qChar", CHARS, "char"); fillSeg("qMove", MOVES, "move"); fillSeg("qFriend", FRIENDS, "friend");
+    bindSeg("qChar", "char"); bindSeg("qMove", "move"); bindSeg("qFriend", "friend");
+    bindSeg("qDir", "dir"); bindSeg("qSpeed", "speed", true); bindSeg("qRow", "row");
+  }
+  const bgs = [["transit", "Over arrivals"], ["black", "Black"], ...LIB.filter((a) => a.spec?.image).slice(0, 4).map((a) => ["img:" + a.id, "🖼 " + a.name])];
+  fillSeg("qBg", bgs, "bg"); bindSeg("qBg", "bg");
+  if (makeTab === "quick") updateQuick();
+}
+
+$("makeTabs").onclick = (e) => {
+  const v = e.target.dataset.v; if (!v) return;
+  makeTab = v; seg("makeTabs", v);
+  $("quickPane").classList.toggle("hidden", v !== "quick"); $("imagePane").classList.toggle("hidden", v !== "image");
+  nameTouched = false;
+  if (v === "quick") updateQuick(); else showMake(imgSpec);
+};
+$("makeName").oninput = () => { nameTouched = true; };
+
+// ---- image upload: crop/fit to 64x32, dither to RGB332 ----
+let imgFile = null, imgFit = "cover", imgDur = 10000;
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+async function processImage() {
+  if (!imgFile) return;
+  const bmp = await createImageBitmap(imgFile);
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const x = c.getContext("2d"); x.fillStyle = "#000"; x.fillRect(0, 0, W, H);
+  x.imageSmoothingQuality = "high";
+  const sc = imgFit === "cover" ? Math.max(W / bmp.width, H / bmp.height) : Math.min(W / bmp.width, H / bmp.height);
+  const dw = bmp.width * sc, dh = bmp.height * sc;
+  x.drawImage(bmp, (W - dw) / 2, (H - dh) / 2, dw, dh);
+  const d = x.getImageData(0, 0, W, H).data, out = new Uint8Array(W * H);
+  for (let p = 0; p < W * H; p++) {
+    const t = (BAYER[(Math.floor(p / W) % 4) * 4 + (p % W) % 4] / 16 - 0.5);   // ordered dithering = smoother gradients
+    const q = (v, levels) => Math.max(0, Math.min(levels - 1, Math.round(v / 255 * (levels - 1) + t)));
+    out[p] = (q(d[p * 4], 8) << 5) | (q(d[p * 4 + 1], 8) << 2) | q(d[p * 4 + 2], 4);
+  }
+  let bin = ""; out.forEach((b) => (bin += String.fromCharCode(b)));
+  const name = imgFile.name.replace(/\.[^.]+$/, "").replace(/[^\x20-\x7E]/g, "").slice(0, 40) || "Photo";
+  imgSpec = { name, duration_ms: imgDur, background: "black", palette: {}, sprites: [], actors: [], image: { rgb332: btoa(bin) } };
+  showMake(imgSpec);
+}
+$("imgFile").onchange = (e) => { imgFile = e.target.files[0]; nameTouched = false; processImage().catch((err) => toast("Couldn't read that image")); };
+$("imgFit").onclick = (e) => { const v = e.target.dataset.v; if (v) { imgFit = v; seg("imgFit", v); processImage(); } };
+$("imgDur").onclick = (e) => { const v = e.target.dataset.v; if (v) { imgDur = Number(v); seg("imgDur", v); if (imgSpec) { imgSpec.duration_ms = imgDur; showMake(imgSpec); } } };
+
+$("makeSave").onclick = async () => {
+  if (!makeSpec) { toast(makeTab === "image" ? "Choose a photo first" : "Pick a character"); return; }
+  const { _bytes, ...spec } = makeSpec;
+  $("makeSave").disabled = true;
+  try {
+    const d = await api("animations/create", { spec, name: $("makeName").value.trim(), source: makeTab === "image" ? "image" : "quick" });
+    await loadLib(); initMake();
+    toast(`Saved "${d.animation.name}" — play it below`);
+  } catch (e) { if (e.message !== "locked") toast(e.message); }
+  finally { $("makeSave").disabled = false; }
 };
 
 // ---- start ----

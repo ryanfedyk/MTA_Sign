@@ -42,12 +42,18 @@ static bool loadCloud(const char* file, CloudAnim& a) {
         for (char c : fr) px.push_back(c >= '0' && c <= '9' ? c - '0' + 1 : c >= 'a' && c <= 'e' ? c - 'a' + 11 : 0);
         sp.frames.push_back(px); }
       a.sprites.push_back(sp);
+    } else if (tag == "I") {   // base64 RGB332 image
+      std::string b64; in >> b64;
+      static const std::string tbl = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      uint32_t acc = 0; int bits = 0;
+      for (char c : b64) { size_t v = tbl.find(c); if (v == std::string::npos) continue; acc = (acc << 6) | v; bits += 6;
+        if (bits >= 8) { bits -= 8; a.image.push_back((acc >> bits) & 0xFF); } }
     } else if (tag == "A") { CloudActor ac; int s2, o, n; in >> s2 >> o >> n; ac.sprite = s2; ac.outline = o;
       for (int i = 0; i < n; i++) { std::string t; int kt, kx, ky, kf; in >> t >> kt >> kx >> ky >> kf; ac.keys.push_back({(uint16_t)kt, (int16_t)kx, (int16_t)ky, kf != 0}); }
       a.actors.push_back(ac);
     }
   }
-  return !a.sprites.empty();
+  return !a.sprites.empty() || !a.image.empty();
 }
 
 int main(int argc, char** argv) {

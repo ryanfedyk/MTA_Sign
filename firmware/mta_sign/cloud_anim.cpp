@@ -31,6 +31,14 @@ static void drawCloudSprite(Adafruit_GFX& g, const CloudAnim& a, const CloudSpri
 bool drawCloudAnim(Adafruit_GFX& g, const CloudAnim& a, uint32_t ms) {
   if (ms >= a.duration) return false;
   if (a.blackBg) g.fillScreen(0);
+  if (a.image.size() == (size_t)SCREEN_W * SCREEN_H) {
+    for (int y = 0; y < SCREEN_H; y++)
+      for (int x = 0; x < SCREEN_W; x++) {
+        uint8_t v = a.image[y * SCREEN_W + x];          // RRRGGGBB
+        uint8_t r = (v >> 5) * 255 / 7, gr = ((v >> 2) & 7) * 255 / 7, b = (v & 3) * 85;
+        g.drawPixel(x, y, rgb565(r, gr, b));
+      }
+  }
 
   for (const CloudActor& act : a.actors) {
     if (act.sprite >= a.sprites.size() || act.keys.empty()) continue;

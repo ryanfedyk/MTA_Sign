@@ -121,13 +121,29 @@ gcloud services enable firestore.googleapis.com --project mta-transit-matrix && 
   whether the passphrase works, and when the sign last checked in. Tick "send a test cat"
   to test the whole path end to end.
 
+## Make your own animations (no AI)
+
+Under **Make your own** in the control panel:
+
+- **Quick animation:** pick a character (walking, running, sitting, sleeping, or
+  peeking cat, mouse, bird, butterfly, heart), a motion (across, there and back, hop,
+  stop and sit, peek up, stay put), something for it to chase, direction, speed, row,
+  and a background (over the arrivals, black, or one of your photos). It's instant and
+  free, and uses the same hand-drawn sprites as the built-in cats.
+- **Upload image:** choose a photo. It's cropped or fitted to 64×32, dithered for LEDs,
+  and shown for 5–15 seconds.
+
+Saved items appear under **Your animations**, where you can play them or add them to
+the idle rotation. The sprite library is in `functions/lib/assets.js`.
+
 ## Animations from a prompt (Gemini)
 
 In the control panel, describe an animation under **Create with Gemini**, for example
 "a cat chases a red laser dot". The steps after that:
 
-1. Gemini draws it as pixel art plus motion: a palette, sprites with a few frames each,
-   and actors moving between timed waypoints. The cloud checks and repairs the result,
+1. Gemini choreographs it: it mostly directs the hand-drawn library sprites (so cats
+   look as good as the built-in ones), only drawing new sprites for things the library
+   doesn't have, and moves them between timed waypoints. The cloud checks and repairs the result,
    asks Gemini to fix it if needed, and saves it.
 2. The app shows a live preview. **Play on sign** shows it now; **Idle** adds it to the
    idle rotation, used when the idle cat is set to **Mix** or **Mine**.

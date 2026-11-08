@@ -338,8 +338,8 @@ static void fillDisc(Adafruit_GFX& g, int x0, int y0, int d, uint16_t color) {
 //
 //    ████     Manhattan          <- label top lines up with the top of the bullet
 //   ██ L ██
-//   ██   ██   12m  18            <- big next train + bold "m", medium following
-//    ████                           train; bottoms line up with the bullet's bottom
+//   ██   ██   12, 18m            <- big next train, comma, medium following train,
+//    ████                           one "m"; bottoms line up with the bullet's bottom
 //
 // Everything that has to be read from across the room uses 2-px strokes.
 // ---------------------------------------------------------------------------
@@ -370,7 +370,9 @@ static void drawLOnly(Adafruit_GFX& g, const TransitData& t) {
   if (name) customText(&g, FACE_SMALL, name, TX, TOP, C_LABEL_SOFT);
   else printAt(g, TX, TOP, 1, C_LABEL_SOFT, t.lLabel);
 
-  // Times, bottoms aligned with the bottom of the bullet
+  // Times, bottoms aligned with the bottom of the bullet:  "12, 18m"
+  // Big next train, comma, medium following train, and one bold "m" at the
+  // end -- reads as a list of minutes (not 12:18), like a countdown clock.
   const int bigY = BOTTOM - BIG_H + 1;     // rows 13..26
   const int medY = BOTTOM - MED_H + 1;     // rows 19..26
 
@@ -379,24 +381,30 @@ static void drawLOnly(Adafruit_GFX& g, const TransitData& t) {
   char a[12], b[12];
   if (t.l1 == 0) snprintf(a, sizeof a, "AR"); else snprintf(a, sizeof a, "%d", t.l1);
   if (t.l2 == 0) snprintf(b, sizeof b, "AR"); else snprintf(b, sizeof b, "%d", t.l2);
-  const bool unit = t.l1 != 0;
   bool hasSecond = t.l2 >= 0;
+  auto lastIsMinutes = [&]() { return hasSecond ? t.l2 > 0 : t.l1 > 0; };
+  bool unit = lastIsMinutes();
 
-  // Fit to 64 px: shrink the gap before the following train, then the
-  // spacing inside the big number, and only then leave the following train out.
+  static const char* const COMMA[4] = {"##", "##", ".#", "#."};   // sits on the baseline, tail dips below
   const int unitW = 1 + textWidth(FACE_MED, "m");
-  int bigGap = 2, gap = 4;
+  int bigGap = 2, cg = 2;                                          // cg = space around the comma
   auto total = [&]() {
-    return TX + textWidth(FACE_BIG, a, bigGap) + (unit ? unitW : 0) + (hasSecond ? gap + textWidth(FACE_MED, b) : 0);
+    return TX + textWidth(FACE_BIG, a, bigGap) + (hasSecond ? cg + 2 + cg + textWidth(FACE_MED, b) : 0) + (unit ? unitW : 0);
   };
-  if (total() > SCREEN_W) gap = 3;
+  // Fit to 64 px: tighten spacing, then drop the "m", then the following train.
+  if (total() > SCREEN_W) cg = 1;
   if (total() > SCREEN_W) bigGap = 1;
-  if (total() > SCREEN_W) gap = 2;
-  if (total() > SCREEN_W) hasSecond = false;
+  if (total() > SCREEN_W) unit = false;
+  if (total() > SCREEN_W) { hasSecond = false; unit = lastIsMinutes(); }
+  if (total() > SCREEN_W) unit = false;
 
   int x = TX + customText(&g, FACE_BIG, a, TX, bigY, C_AMBER, bigGap);
-  if (unit) x += 1 + customText(&g, FACE_MED, "m", x + 1, medY, C_AMBER);
-  if (hasSecond) customText(&g, FACE_MED, b, x + gap, medY, C_AMBER_2ND);
+  if (hasSecond) {
+    blit(g, COMMA, 4, x + cg, BOTTOM - 2, C_AMBER_2ND);
+    x += cg + 2 + cg;
+    x += customText(&g, FACE_MED, b, x, medY, C_AMBER_2ND);
+  }
+  if (unit) customText(&g, FACE_MED, "m", x + 1, medY, hasSecond ? C_AMBER_2ND : C_AMBER);
 }
 
 void drawTransit(Adafruit_GFX& g, const TransitData& t) {

@@ -14,8 +14,12 @@
 // Actors move in straight lines between keyframes (x, y = sprite's top-left
 // corner) and are hidden before their first / after their last keyframe.
 
+const { ASSETS, ASSET_PALETTE, catalogText } = require("./assets");
+
+const IMAGE_W = 64, IMAGE_H = 32;   // optional full-screen image layer (RGB332, 1 byte/pixel)
+
 const LIMITS = {
-  maxW: 48, maxH: 32, maxFrames: 8, maxSprites: 6, maxActors: 8, maxKeys: 24,
+  maxW: 48, maxH: 32, maxFrames: 8, maxSprites: 10, maxActors: 12, maxKeys: 24,
   maxColors: 15, minDuration: 1000, maxDuration: 15000, maxPromptLength: 400,
   maxLibrary: 12, maxDeviceBytes: 20000,
 };
@@ -36,11 +40,57 @@ function parseColor(c) {
 }
 
 /**
+ * Replace {"asset": "cat_walk"} sprites with the library's frames, merging the
+ * library colors into the spec's palette (re-lettering on conflicts).
+ */
+function expandAssets(raw) {
+  if (!raw || !Array.isArray(raw.sprites) || !raw.sprites.some((sp) => sp && sp.asset)) return raw;
+  const palette = { ...(raw.palette || {}) };
+  const byHex = {};
+  for (const [k, v] of Object.entries(palette)) { const h = parseColor(v); if (h) byHex[h] = k; }
+  const spare = [..."ACDEFGHIJKLMNOPQSTUVXYZ123456789"].filter((c) => !(c in palette) && !(c in ASSET_PALETTE));
+
+  const charFor = (assetChar) => {
+    const hex = ASSET_PALETTE[assetChar].slice(1);
+    if (byHex[hex]) return byHex[hex];
+    let c = assetChar in palette ? spare.shift() : assetChar;
+    if (!c) return null;
+    palette[c] = "#" + hex;
+    byHex[hex] = c;
+    return c;
+  };
+
+  const sprites = raw.sprites.map((sp) => {
+    if (!sp || !sp.asset) return sp;
+    const a = ASSETS[sp.asset];
+    if (!a) throw new Error(`unknown asset "${sp.asset}" (available: ${Object.keys(ASSETS).join(", ")})`);
+    const map = {};
+    const frames = a.frames.map((f) => f.map((row) => [...row].map((ch) => {
+      if (ch === ".") return ".";
+      if (!(ch in map)) map[ch] = charFor(ch);
+      return map[ch] || ".";
+    }).join("")));
+    return { name: sp.name || a.label, frame_ms: sp.frame_ms ?? a.frame_ms, frames };
+  });
+  return { ...raw, palette, sprites };
+}
+
+function normalizeImage(img) {
+  if (!img) return null;
+  const b64 = typeof img === "string" ? img : img.rgb332;
+  const bytes = Buffer.from(String(b64 || ""), "base64");
+  if (bytes.length !== IMAGE_W * IMAGE_H) throw new Error(`image must be ${IMAGE_W}x${IMAGE_H} RGB332 (got ${bytes.length} bytes)`);
+  return { rgb332: bytes.toString("base64") };
+}
+
+/**
  * Validate and repair a spec (from Gemini or the app). Returns a clean spec or
  * throws an Error whose message explains what's wrong (fed back to Gemini).
  */
 function normalizeSpec(raw) {
   if (!raw || typeof raw !== "object") throw new Error("Animation must be a JSON object");
+  raw = expandAssets(raw);
+  const image = normalizeImage(raw.image);
   const duration = clampInt(raw.duration_ms ?? raw.duration, LIMITS.minDuration, LIMITS.maxDuration, 5000);
   const background = raw.background === "black" ? "black" : "transit";
   const name = String(raw.name || "Untitled").replace(/[^\x20-\x7E]/g, "").trim().slice(0, 40) || "Untitled";
@@ -53,6 +103,10 @@ function normalizeSpec(raw) {
     if (!hex) continue;
     if (Object.keys(palette).length >= LIMITS.maxColors) break;
     palette[k] = "#" + hex;
+  }
+  const imageOnly = image && (!Array.isArray(raw.sprites) || !raw.sprites.length);
+  if (imageOnly) {
+    return { name, duration_ms: duration, background: "black", palette: {}, sprites: [], actors: [], image };
   }
   if (!Object.keys(palette).length) throw new Error("palette has no valid colors (use single-character keys and #RRGGBB values)");
 
@@ -100,7 +154,7 @@ function normalizeSpec(raw) {
     return { sprite, outline: a.outline !== false, keyframes: keys };
   });
 
-  return { name, duration_ms: duration, background, palette, sprites, actors };
+  return { name, duration_ms: duration, background: image ? "black" : background, palette, sprites, actors, ...(image ? { image } : {}) };
 }
 
 /** Compact form for the ESP32 (palette as an array, sprites as index strings). */
@@ -120,28 +174,33 @@ function toDevice(spec, id, { idle = false } = {}) {
       fr: sp.frames.map((rows) => rows.map((row) => [...row].map((ch) => (ch === "." ? "." : code[ch])).join("")).join("")),
     })),
     a: spec.actors.map((a) => ({ s: a.sprite, o: a.outline ? 1 : 0, k: a.keyframes.map((k) => [k.t, k.x, k.y, k.flip ? 1 : 0]) })),
+    ...(spec.image ? { img: spec.image.rgb332 } : {}),
   };
 }
 
 // ---------------------------------------------------------------------------
 // Gemini
 // ---------------------------------------------------------------------------
+// Example answer shown to Gemini: library sprites + one small hand-drawn prop.
 const EXAMPLE = {
-  name: "Orange cat strolls by",
-  duration_ms: 4500,
+  name: "Cat chases a laser dot",
+  duration_ms: 5200,
   background: "transit",
-  palette: { o: "#ff7d0f", d: "#a53700", w: "#ffe1af", p: "#ff698c", e: "#78ff50" },
-  sprites: [{
-    name: "cat walking right",
-    frame_ms: 140,
-    frames: [
-      [".o........o....o", "o.........oo..oo", "o.........oooooo", "o.........oeooeo", ".ooodoodooowppwo", "..oodoodoooowwo.",
-        "..oodoodoooo....", "..oooooooooo....", "..owwwwwwwoo....", "..o..o...o..o...", ".o...o..o....o.."],
-      ["o.........o....o", "o.........oo..oo", "o.........oooooo", ".o........oeooeo", ".ooodoodooowppwo", "..oodoodoooowwo.",
-        "..oodoodoooo....", "..oooooooooo....", "..owwwwwwwoo....", "...o.o....o.o...", "...o.o....o.o..."],
-    ],
-  }],
-  actors: [{ sprite: 0, outline: true, keyframes: [{ t: 0, x: -16, y: 21, flip: false }, { t: 4400, x: 64, y: 21, flip: false }] }],
+  palette: { r: "#ff2828", R: "#ffb4b4" },
+  sprites: [
+    { asset: "laser" },
+    { asset: "cat_run" },
+    { asset: "cat_sit" },
+  ],
+  actors: [
+    { sprite: 0, outline: false, keyframes: [
+      { t: 0, x: 70, y: 27 }, { t: 600, x: 40, y: 28 }, { t: 1500, x: 8, y: 26 },
+      { t: 2300, x: 50, y: 27 }, { t: 3200, x: 66, y: 27 } ] },
+    { sprite: 1, outline: true, keyframes: [
+      { t: 700, x: 66, y: 21, flip: true }, { t: 1700, x: 6, y: 21, flip: true },
+      { t: 1701, x: 6, y: 21, flip: false }, { t: 3300, x: 66, y: 21, flip: false } ] },
+    { sprite: 2, outline: true, keyframes: [ { t: 3600, x: 50, y: 20, flip: true }, { t: 5200, x: 50, y: 20, flip: true } ] },
+  ],
 };
 
 const SYSTEM_PROMPT = `You are a pixel-art animator for a 64x32 RGB LED matrix sign that hangs in a home and shows subway arrival times.
@@ -162,6 +221,9 @@ JSON format:
 Rules:
 - Every row of every frame of a sprite has the same length; every frame of a sprite has the same number of rows. Max sprite size 40 wide x 32 tall. Typical characters are 10-20 px wide.
 - Each character in a row is either "." (transparent) or a palette key.
+- PREFER THE SPRITE LIBRARY. Instead of drawing, a sprite can be { "asset": "<name>" } (optionally with "frame_ms"); its frames and colors are filled in automatically and look much better than new drawings. Always use the library for cats. Only draw new sprites for things the library doesn't have (keep them simple: bold shapes, 2-4 colors).
+  Library (all face right; flip to face left):
+${catalogText()}
 - x, y is the sprite's top-left corner. Actors move in a straight line between keyframes and are hidden before their first and after their last keyframe. Start/end off-screen (e.g. x = -width or x = 64) for entrances and exits.
 - Sprites face right; set "flip": true to face left.
 - Frames loop while the actor is visible: use 2-4 frames for walking/flapping cycles.
@@ -170,7 +232,7 @@ Rules:
 - With "transit", keep the action quick (3-6 s) and prefer the bottom half or a pass across the screen. With "black", you can fill the screen and tell a tiny story; you may add a still sprite (one frame, keyframes at t=0 and t=duration) as scenery.
 - Multiple actors are encouraged for interaction (a cat chasing a mouse, birds flying in formation, rain drops, etc.).
 
-Example of a good answer for "a cat walks across":
+Example of a good answer for "a cat chases a laser dot":
 ${JSON.stringify(EXAMPLE)}`;
 
 function extractJson(text) {
@@ -249,4 +311,4 @@ async function generateAnimation(prompt, { apiKey, model = "gemini-3.8-flash", f
   throw new Error(`Gemini's animation wasn't usable (${lastErr.message}). Try rephrasing.`);
 }
 
-module.exports = { LIMITS, normalizeSpec, toDevice, generateAnimation, extractJson, SYSTEM_PROMPT, EXAMPLE };
+module.exports = { LIMITS, IMAGE_W, IMAGE_H, normalizeSpec, expandAssets, toDevice, generateAnimation, extractJson, SYSTEM_PROMPT, EXAMPLE };

@@ -33,6 +33,7 @@
 #include <HTTPUpdate.h>
 #include <Preferences.h>
 #include <esp_ota_ops.h>
+#include <mbedtls/base64.h>
 #include <time.h>
 
 #include "secrets.h"
@@ -251,7 +252,14 @@ static CloudAnimPtr parseCloudAnim(JsonObjectConst o) {
     }
     if (act.sprite < a->sprites.size() && !act.keys.empty()) a->actors.push_back(std::move(act));
   }
-  if (a->sprites.empty() || a->actors.empty() || !a->id[0]) return nullptr;
+  const char* img = o["img"] | "";
+  if (*img) {   // uploaded photo: 64x32 RGB332, base64
+    a->image.resize(SCREEN_W * SCREEN_H);
+    size_t got = 0;
+    if (mbedtls_base64_decode(a->image.data(), a->image.size(), &got, (const unsigned char*)img, strlen(img)) != 0 ||
+        got != a->image.size()) a->image.clear();
+  }
+  if (!a->id[0] || (a->image.empty() && (a->sprites.empty() || a->actors.empty()))) return nullptr;
   return a;
 }
 

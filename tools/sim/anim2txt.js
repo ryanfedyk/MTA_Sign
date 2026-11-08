@@ -15,4 +15,5 @@ for (const a of d.a) {
   out.push(`A ${a.s} ${a.o} ${a.k.length}`);
   for (const k of a.k) out.push(`K ${k.join(" ")}`);
 }
+if (d.img) out.push(`I ${d.img}`);
 process.stdout.write(out.join("\n") + "\n");

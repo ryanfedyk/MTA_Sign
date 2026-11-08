@@ -173,6 +173,19 @@ exports.app = onRequest({ ...HTTP_OPTS, memory: "512MiB", timeoutSeconds: 300 },
       const id = await s.addAnimation({ name: spec.name, prompt, spec, inIdle: false, createdAt: Date.now() });
       return res.json({ ok: true, animation: { id, name: spec.name, prompt, spec, inIdle: false } });
     }
+    if (req.method === "GET" && route === "/api/assets") {
+      const { ASSETS, ASSET_PALETTE } = require("./lib/assets");
+      return res.json({ palette: ASSET_PALETTE, assets: ASSETS });
+    }
+    // Save an animation made without AI (Quick animation builder, uploaded image).
+    if (req.method === "POST" && route === "/api/animations/create") {
+      let spec;
+      try { spec = animations.normalizeSpec(body.spec); } catch (e) { return res.status(400).json({ error: e.message }); }
+      if (body.name) spec.name = String(body.name).replace(/[^\x20-\x7E]/g, "").trim().slice(0, 40) || spec.name;
+      const prompt = String(body.source || "").slice(0, 100);
+      const id = await s.addAnimation({ name: spec.name, prompt, spec, inIdle: false, createdAt: Date.now() });
+      return res.json({ ok: true, animation: { id, name: spec.name, prompt, spec, inIdle: false } });
+    }
     if (req.method === "POST" && route === "/api/animations/update") {
       if (!body.id) return res.status(400).json({ error: "Missing id" });
       const patch = {};

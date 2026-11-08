@@ -33,6 +33,7 @@ struct CloudAnim {
   uint16_t palette[15] = {0};
   std::vector<CloudSprite> sprites;
   std::vector<CloudActor> actors;
+  std::vector<uint8_t> image;                  // optional 64x32 RGB332 background (uploaded photos)
 };
 
 using CloudAnimPtr = std::shared_ptr<const CloudAnim>;
