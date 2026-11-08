@@ -31,8 +31,8 @@ train in big digits and the one after in small digits.
 **Colors:** amber means live GPS and white means scheduled. "AR" means arriving now,
 and "--" means no data.
 
-**Brightness:** daytime 12 and night (10 PM – 7 AM) 5, both a little dimmer than
-before. Change them from the control panel.
+**Brightness:** daytime 12 and night 5. Night runs 5 PM – 7 AM by default. Change
+the levels and the night hours from the control panel.
 
 **Idle cat:** about every 30 seconds a cat strolls along the bottom of the screen.
 There are three cats:

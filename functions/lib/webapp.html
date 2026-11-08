@@ -102,6 +102,7 @@
   /* sliders */
   input[type=range] { width: 100%; accent-color: var(--orange); height: 28px; }
   .val { font-variant-numeric: tabular-nums; color: var(--text); }
+  select.hour { background: var(--card2); color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 7px 8px; font: inherit; font-size: 14px; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
 
   /* gate + toast */
@@ -205,8 +206,12 @@
       <h2>Brightness</h2>
       <div class="between"><span>Daytime</span><span class="val" id="dayVal"></span></div>
       <input type="range" id="day" min="1" max="64" step="1">
-      <div class="between" style="margin-top:10px"><span>Night <span style="color:var(--muted);font-size:13px">(10 PM – 7 AM)</span></span><span class="val" id="nightVal"></span></div>
+      <div class="between" style="margin-top:10px"><span>Night</span><span class="val" id="nightVal"></span></div>
       <input type="range" id="night" min="1" max="64" step="1">
+      <div class="between" style="margin-top:8px;gap:8px;font-size:14px;color:var(--muted)">
+        <span>Night runs from</span><select id="nightStart" class="hour"></select>
+        <span>to</span><select id="nightEnd" class="hour"></select>
+      </div>
       <div class="hint">Changes reach the sign within a few seconds.</div>
     </section>
 
@@ -291,6 +296,7 @@ function seg(id, value) { $(id).querySelectorAll("button").forEach((b) => b.clas
 function render() {
   $("day").value = S.brightness.day; $("dayVal").textContent = S.brightness.day;
   $("night").value = S.brightness.night; $("nightVal").textContent = S.brightness.night;
+  $("nightStart").value = S.brightness.nightStart ?? 17; $("nightEnd").value = S.brightness.nightEnd ?? 7;
   const on = S.idle.every > 0;
   $("idleOn").checked = on;
   seg("every", on ? S.idle.every : -1); seg("style", S.idle.style);
@@ -318,6 +324,11 @@ function save(patch, msg) {
   }, 250);
 }
 
+const hourLabel = (h) => (h === 0 ? "12 AM" : h < 12 ? h + " AM" : h === 12 ? "12 PM" : h - 12 + " PM");
+["nightStart", "nightEnd"].forEach((k) => {
+  for (let h = 0; h < 24; h++) { const o = document.createElement("option"); o.value = h; o.textContent = hourLabel(h); $(k).appendChild(o); }
+  $(k).onchange = () => save({ brightness: { [k]: Number($(k).value) } }, "Night hours saved");
+});
 ["day", "night"].forEach((k) => {
   $(k).oninput = () => { $(k + "Val").textContent = $(k).value; };
   $(k).onchange = () => save({ brightness: { [k]: Number($(k).value) } }, "Brightness saved");
@@ -563,7 +574,7 @@ $("gen").onclick = async () => {
   if (bgPick === "black") prompt += "\n(Use background \"black\": a full-screen scene.)";
   const btn = $("gen"); btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span>Gemini is drawing…';
-  $("genNote").textContent = "This usually takes 10–40 seconds.";
+  $("genNote").textContent = "This can take up to a couple of minutes.";
   try {
     const d = await api("animations/generate", { prompt });
     current = LIB.find((x) => x.id === d.animation.id) || d.animation;

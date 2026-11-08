@@ -29,11 +29,11 @@ test("brightness and idle settings round-trip and reach the sign", async () => {
   let r = await call(app, { method: "POST", path: "/api/settings", headers: PIN,
     body: { brightness: { day: 20 }, idle: { every: 60, style: "mix" } } });
   assert.strictEqual(r.status, 200);
-  assert.deepStrictEqual(r.body.brightness, { day: 20, night: 5 });
+  assert.deepStrictEqual(r.body.brightness, { day: 20, night: 5, nightStart: 17, nightEnd: 7 });
   assert.deepStrictEqual(r.body.idle, { every: 60, style: "mix" });
 
   r = await call(sign);
-  assert.deepStrictEqual(r.body, { bd: 20, bn: 5, ie: 60, is: "mix", lv: 0 });
+  assert.deepStrictEqual(r.body, { bd: 20, bn: 5, ns: 17, ne: 7, ie: 60, is: "mix", lv: 0 });
 });
 
 test("play + message commands get increasing ids the sign can pick up", async () => {
@@ -69,7 +69,7 @@ test("/sign falls back to defaults if the database is unavailable", async () => 
   setStore(broken);
   const r = await call(sign);
   assert.strictEqual(r.status, 200);
-  assert.deepStrictEqual(r.body, { bd: 12, bn: 5, ie: 30, is: "walk", lv: 0 });
+  assert.deepStrictEqual(r.body, { bd: 12, bn: 5, ns: 17, ne: 7, ie: 30, is: "walk", lv: 0 });
   // ...and the app explains the problem instead of crashing
   const a = await call(app, { path: "/api/settings", headers: PIN });
   assert.strictEqual(a.status, 503);

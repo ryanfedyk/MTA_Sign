@@ -11,7 +11,9 @@ const ANIMATIONS = [
 const IDLE_STYLES = [...ANIMATIONS.map((a) => a.id), "mix", "mine"];
 
 const DEFAULTS = Object.freeze({
-  brightness: { day: 12, night: 5 },   // 8-bit panel brightness (was 16 / 6 originally)
+  // 8-bit panel brightness (was 16 / 6 originally); "night" applies from
+  // nightStart to nightEnd (local hours, wrapping past midnight).
+  brightness: { day: 12, night: 5, nightStart: 17, nightEnd: 7 },
   idle: { every: 30, style: "walk" },  // seconds between idle cats; 0 = off
   anim: null,                          // {seq, name, at}
   msg: null,                           // {seq, text, repeat, at}
@@ -63,6 +65,12 @@ function validatePatch(body = {}) {
         patch.brightness[k] = clamp(body.brightness[k], LIMITS.brightness);
       }
     }
+    for (const k of ["nightStart", "nightEnd"]) {
+      if (body.brightness[k] !== undefined) {
+        if (!Number.isFinite(Number(body.brightness[k]))) throw new Error(`brightness.${k} must be an hour`);
+        patch.brightness[k] = clamp(body.brightness[k], [0, 23]);
+      }
+    }
   }
   if (body.idle) {
     patch.idle = {};
@@ -83,6 +91,8 @@ function deviceView(cfg, nowMs = Date.now()) {
   const out = {
     bd: cfg.brightness.day,
     bn: cfg.brightness.night,
+    ns: cfg.brightness.nightStart,   // night brightness from this hour...
+    ne: cfg.brightness.nightEnd,     // ...until this hour (local time)
     ie: cfg.idle.every,
     is: cfg.idle.style,
     lv: cfg.lib.v % 1e9,  // animation library version (fits 32 bits); the sign re-downloads /anims when it changes

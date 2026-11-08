@@ -43,8 +43,8 @@ jobs:
             echo
           fi
           if [ "${{ inputs.test_gemini }}" = "true" ]; then
-            echo "== Asking Gemini for a test animation (can take ~60 s)"
-            out=$(curl -sS -m 130 -w "\n%{http_code}" -X POST -H "content-type: application/json" \
+            echo "== Asking Gemini for a test animation (can take a couple of minutes)"
+            out=$(curl -sS -m 320 -w "\n%{http_code}" -X POST -H "content-type: application/json" \
               -H "x-sign-pin: $SIGN_APP_PIN" -d '{"prompt":"a small cat walks across the bottom of the sign"}' \
               "$BASE/app/api/animations/generate")
             code=$(echo "$out" | tail -n1); body=$(echo "$out" | sed '$d')

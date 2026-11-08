@@ -64,7 +64,7 @@ static const uint32_t WIFI_GIVE_UP_MS  = 5UL * 60 * 1000; // reboot after 5 min 
 // Defaults until the cloud says otherwise (a little dimmer than before: was 16 / 6).
 static const uint8_t DEFAULT_DAY_BRIGHTNESS   = 12;
 static const uint8_t DEFAULT_NIGHT_BRIGHTNESS = 5;
-static const int NIGHT_STARTS = 22, NIGHT_ENDS = 7;       // local hours
+static const int DEFAULT_NIGHT_STARTS = 17, DEFAULT_NIGHT_ENDS = 7;   // local hours; set from the app
 
 #define PANEL_RES_X 64
 #define PANEL_RES_Y 32
@@ -93,6 +93,8 @@ static const int MAX_MSG = 80;
 struct SignSettings {
   uint8_t dayBright = DEFAULT_DAY_BRIGHTNESS;
   uint8_t nightBright = DEFAULT_NIGHT_BRIGHTNESS;
+  uint8_t nightStart = DEFAULT_NIGHT_STARTS;     // night brightness from this hour...
+  uint8_t nightEnd = DEFAULT_NIGHT_ENDS;         // ...until this hour
   uint16_t idleSec = 30;           // 0 = no idle animation
   char idleAnim[40] = "walk";      // "walk" | "chase" | "peek" | "mix" | "mine"
   uint32_t animId = 0;             // changes each time the app presses "Play"
@@ -280,6 +282,8 @@ static void fetchSign() {
   SignSettings s;
   s.dayBright   = doc["bd"] | DEFAULT_DAY_BRIGHTNESS;
   s.nightBright = doc["bn"] | DEFAULT_NIGHT_BRIGHTNESS;
+  s.nightStart  = doc["ns"] | DEFAULT_NIGHT_STARTS;
+  s.nightEnd    = doc["ne"] | DEFAULT_NIGHT_ENDS;
   s.idleSec     = doc["ie"] | 30;
   copyStr(s.idleAnim, sizeof s.idleAnim, doc["is"] | "walk");
   s.libVersion = doc["lv"] | 0;
@@ -455,7 +459,11 @@ static void startIdle(const SignSettings& s, uint32_t now) {
 static void updateBrightness(const SignSettings& s) {
   struct tm ti;
   bool night = false;
-  if (getLocalTime(&ti, 5)) night = ti.tm_hour >= NIGHT_STARTS || ti.tm_hour < NIGHT_ENDS;
+  if (getLocalTime(&ti, 5)) {
+    int h = ti.tm_hour;
+    night = s.nightStart > s.nightEnd ? (h >= s.nightStart || h < s.nightEnd)    // wraps past midnight
+                                      : (h >= s.nightStart && h < s.nightEnd);
+  }
   uint8_t b = night ? s.nightBright : s.dayBright;
   if (b != appliedBrightness) {
     dma_display->setBrightness8(b);

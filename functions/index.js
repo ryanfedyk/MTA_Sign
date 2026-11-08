@@ -115,7 +115,7 @@ function pinOk(given) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Gemini can take a while to draw, so the app gets a longer timeout.
-exports.app = onRequest({ ...HTTP_OPTS, memory: "512MiB", timeoutSeconds: 120 }, async (req, res) => {
+exports.app = onRequest({ ...HTTP_OPTS, memory: "512MiB", timeoutSeconds: 300 }, async (req, res) => {
   const route = new URL(req.url, "http://localhost").pathname.replace(/\/+$/, "") || "/";
   res.set("Cache-Control", "no-store");
 

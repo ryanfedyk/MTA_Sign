@@ -124,3 +124,17 @@ test("app: idle style 'mine' is accepted", async () => {
   const r = await call(app, { method: "POST", path: "/api/settings", headers: PIN, body: { idle: { style: "mine" } } });
   assert.strictEqual(r.body.idle.style, "mine");
 });
+
+test("Gemini is asked for low thinking, and retried without it if the model refuses", async () => {
+  const bodies = [];
+  let first = true;
+  const fetchImpl = async (url, opts) => {
+    const body = JSON.parse(opts.body); bodies.push(body);
+    if (first) { first = false; return { ok: false, status: 400, json: async () => ({ error: { message: "thinking_level is not supported" } }) }; }
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(anim.EXAMPLE) }] } }] }) };
+  };
+  const spec = await anim.generateAnimation("cat", { apiKey: "k", fetchImpl });
+  assert.ok(spec.sprites.length);
+  assert.deepStrictEqual(bodies[0].generationConfig.thinkingConfig, { thinkingLevel: "low" });
+  assert.strictEqual(bodies[1].generationConfig.thinkingConfig, undefined);
+});

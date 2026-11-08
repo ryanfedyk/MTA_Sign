@@ -4,7 +4,7 @@ const s = require("../lib/settings");
 
 test("defaults are a little dimmer than the original 16/6", () => {
   const d = s.withDefaults();
-  assert.deepStrictEqual(d.brightness, { day: 12, night: 5 });
+  assert.deepStrictEqual(d.brightness, { day: 12, night: 5, nightStart: 17, nightEnd: 7 });
   assert.deepStrictEqual(d.idle, { every: 30, style: "walk" });
 });
 
@@ -29,6 +29,10 @@ test("device view only carries fresh commands", () => {
     msg: { seq: 7, text: "Hi", repeat: 2, at: now - 10 * 60_000 }, // 10 min old
   });
   const v = s.deviceView(cfg, now);
-  assert.deepStrictEqual(v, { bd: 12, bn: 5, ie: 30, is: "walk", lv: 0, a: { i: 3, n: "peek" } });
+  assert.deepStrictEqual(v, { bd: 12, bn: 5, ns: 17, ne: 7, ie: 30, is: "walk", lv: 0, a: { i: 3, n: "peek" } });
   assert.strictEqual(s.deviceView(cfg, now + 120_000).a, undefined);
+});
+
+test("night hours are validated as 0-23", () => {
+  assert.deepStrictEqual(s.validatePatch({ brightness: { nightStart: 17, nightEnd: 30 } }), { brightness: { nightStart: 17, nightEnd: 23 } });
 });

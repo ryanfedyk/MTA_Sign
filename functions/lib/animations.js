@@ -180,7 +180,7 @@ function extractJson(text) {
   return JSON.parse(t.slice(start, end + 1));
 }
 
-async function callGemini({ apiKey, model, contents, fetchImpl = fetch, timeoutMs = 100000 }) {
+async function callGemini({ apiKey, model, contents, fetchImpl = fetch, timeoutMs = 240000, lowThinking = true }) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
   try {
@@ -193,13 +193,22 @@ async function callGemini({ apiKey, model, contents, fetchImpl = fetch, timeoutM
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
           contents,
-          generationConfig: { responseMimeType: "application/json", temperature: 0.9 },
+          generationConfig: {
+            responseMimeType: "application/json",
+            temperature: 0.9,
+            // Pixel art doesn't need long deliberation; this makes answers much faster.
+            ...(lowThinking ? { thinkingConfig: { thinkingLevel: "low" } } : {}),
+          },
         }),
       }
     );
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       const msg = body?.error?.message || `HTTP ${res.status}`;
+      // Older/other models may not accept thinkingLevel: retry once without it.
+      if (lowThinking && res.status === 400 && /thinking/i.test(msg)) {
+        return callGemini({ apiKey, model, contents, fetchImpl, timeoutMs, lowThinking: false });
+      }
       const err = new Error(`Gemini error: ${msg}`);
       err.status = res.status;
       throw err;
@@ -208,6 +217,9 @@ async function callGemini({ apiKey, model, contents, fetchImpl = fetch, timeoutM
     const text = parts.filter((p) => !p.thought && typeof p.text === "string").map((p) => p.text).join("");
     if (!text) throw new Error("Gemini returned an empty answer" + (body?.candidates?.[0]?.finishReason ? ` (${body.candidates[0].finishReason})` : ""));
     return text;
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error("Gemini took too long to answer. Try a simpler idea or try again.");
+    throw e;
   } finally {
     clearTimeout(timer);
   }
