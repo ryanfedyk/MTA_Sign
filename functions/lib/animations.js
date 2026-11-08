@@ -242,6 +242,8 @@ function extractJson(text) {
   return JSON.parse(t.slice(start, end + 1));
 }
 
+const isBusy = (e) => e.status === 429 || e.status === 503 || /high demand|overloaded|try again later/i.test(e.message);
+
 // Gemini sometimes answers "high demand" / rate limited for a few seconds:
 // wait and try again before giving up.
 async function callGemini(opts) {
@@ -250,8 +252,7 @@ async function callGemini(opts) {
     try {
       return await callGeminiOnce(opts);
     } catch (e) {
-      const busy = e.status === 429 || e.status === 503 || /high demand|overloaded|try again later/i.test(e.message);
-      if (!busy || i >= waits.length) throw e;
+      if (!isBusy(e) || i >= waits.length) throw e;
       await new Promise((r) => setTimeout(r, waits[i]));
     }
   }
@@ -306,7 +307,25 @@ async function callGeminiOnce({ apiKey, model, contents, fetchImpl = fetch, time
  * Ask Gemini for an animation. Retries once, telling Gemini what was wrong,
  * if the first answer can't be used.
  */
-async function generateAnimation(prompt, { apiKey, model = "gemini-3.8-flash", fetchImpl = fetch, retryWaits } = {}) {
+const FALLBACK_MODELS = ["gemini-3.6-flash"];
+
+/**
+ * Ask Gemini for an animation. If the chosen model stays overloaded, fall
+ * back to another Gemini model before giving up.
+ */
+async function generateAnimation(prompt, opts = {}) {
+  const models = [opts.model || "gemini-3.8-flash", ...FALLBACK_MODELS.filter((m) => m !== opts.model)];
+  for (let i = 0; ; i++) {
+    try {
+      return await generateWith(prompt, { ...opts, model: models[i] });
+    } catch (e) {
+      if (!isBusy(e) || i + 1 >= models.length) throw e;
+      console.warn(`Gemini model ${models[i]} is busy, trying ${models[i + 1]}`);
+    }
+  }
+}
+
+async function generateWith(prompt, { apiKey, model, fetchImpl = fetch, retryWaits } = {}) {
   if (!apiKey) throw new Error("Gemini isn't set up yet (add the GEMINI_API_KEY secret and redeploy).");
   const request = String(prompt || "").trim().slice(0, LIMITS.maxPromptLength);
   if (!request) throw new Error("Describe the animation you want");

@@ -190,3 +190,15 @@ test("busy Gemini (503 / high demand) is retried automatically", async () => {
   assert.strictEqual(n, 3);
   assert.ok(spec.actors.length);
 });
+
+test("if the main model stays busy, a fallback Gemini model is used", async () => {
+  const urls = [];
+  const fetchImpl = async (url) => {
+    urls.push(url);
+    if (url.includes("gemini-3.8-flash")) return { ok: false, status: 503, json: async () => ({ error: { message: "high demand" } }) };
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(anim.EXAMPLE) }] } }] }) };
+  };
+  const spec = await anim.generateAnimation("cat", { apiKey: "k", fetchImpl, retryWaits: [1] });
+  assert.ok(spec.actors.length);
+  assert.ok(urls.some((u) => u.includes("gemini-3.6-flash")));
+});
