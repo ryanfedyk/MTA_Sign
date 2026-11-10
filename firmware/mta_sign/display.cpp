@@ -610,42 +610,41 @@ static void drawClock(Adafruit_GFX& g, const TransitData& t, uint32_t ms, const 
 }
 
 // ---------------------------------------------------------------------------
-// One route + clock:
-//    (L) Manhattan            compact bullet, direction (or the problem)
-//        4, 11m               next arrivals
-//   ─────────────────
-//   10:42        Tue          clock in your clock style, date on the right
-//                Nov 10
+// One route + clock (designed with breathing room):
+//
+//    (L)  4, 11m          MN      <- bullet, next arrivals, direction code
+//                                    (a warning triangle replaces the code
+//                                     when the route has a problem)
+//          3:42   Tue
+//                 Nov 10          <- clock in your style + date, centered together
 // ---------------------------------------------------------------------------
 static void drawRouteClock(Adafruit_GFX& g, const TransitData& t, uint32_t ms, const ClockTime* now, bool bus) {
-  const int BX = 2, BY = 1, BD = 15, TX = 21;        // badge rows 1..15
+  const int BX = 3, BY = 2, BD = 11;                 // top line: rows 2..12
 
   // Badge
+  int tx;
   if (bus) {
-    g.fillRoundRect(BX - 1, BY, BD + 2, BD, 3, C_B_BLUE);
-    customText(&g, FACE_SMALL, "B48", BX + 2, BY + 5, C_WHITE);
+    g.fillRoundRect(BX - 1, BY, 16, BD, 3, C_B_BLUE);
+    customText(&g, FACE_SMALL, "B48", BX + 1, BY + 3, C_WHITE);
+    tx = BX + 15 + 3;
   } else {
     fillDisc(g, BX, BY, BD, C_L_GREY);
-    blit(g, BULLET_L_SMALL, BULLET_L_SMALL_H, BX + 5, BY + 3, C_WHITE);
+    static const char* const L7[7] = {"##...", "##...", "##...", "##...", "##...", "#####", "#####"};
+    blit(g, L7, 7, BX + 3, BY + 2, C_WHITE);
+    tx = BX + BD + 4;
   }
 
-  // Direction (alternates with the problem, if any)
-  const char* alert = bus ? t.bAlert : t.lAlert;
-  const uint8_t sev = bus ? t.bSev : t.lSev;
-  const char* dir = bus ? (!strcmp(t.bLabel, "NB") ? "Northbound" : "Southbound") : (directionName(t.lLabel) ? directionName(t.lLabel) : t.lLabel);
-  if (alert[0] && showAlertNow(ms)) customText(&g, FACE_SMALL, alert, TX, BY + 1, alertColor(sev));
-  else customText(&g, FACE_SMALL, dir, TX, BY + 1, C_LABEL_SOFT);
-
-  // Times: medium bold "4, 11m" on the badge's baseline
+  // Next arrivals: medium bold "4, 11m", sitting on the badge's baseline
   const int t1 = bus ? t.b1 : t.l1, t2 = bus ? t.b2 : t.l2;
   const uint16_t c1 = bus ? (t.bLive1 ? C_AMBER : C_WHITE) : C_AMBER;
   const uint16_t c2 = bus ? (t.bLive2 ? C_AMBER_2ND : rgb565(220, 220, 220)) : C_AMBER_2ND;
-  const int ty = BY + BD - MED_H;                   // rows 8..15, on the badge's bottom edge
-  if (t1 < 0) customText(&g, FACE_MED, "--", TX, ty, C_DIM);
+  const int ty = BY + BD - MED_H;                    // rows 5..12
+  int x = tx;
+  if (t1 < 0) x += customText(&g, FACE_MED, "--", tx, ty, C_DIM);
   else {
     char a[12], b[12];
     if (t1 == 0) snprintf(a, sizeof a, "AR"); else snprintf(a, sizeof a, "%d", t1);
-    int x = TX + customText(&g, FACE_MED, a, TX, ty, c1);
+    x += customText(&g, FACE_MED, a, tx, ty, c1);
     if (t2 >= 0) {
       static const char* const COMMA[3] = {"#", "#", "#"};
       blit(g, COMMA, 3, x + 2, ty + 6, c2);
@@ -653,36 +652,51 @@ static void drawRouteClock(Adafruit_GFX& g, const TransitData& t, uint32_t ms, c
       if (t2 == 0) snprintf(b, sizeof b, "AR"); else snprintf(b, sizeof b, "%d", t2);
       x += customText(&g, FACE_MED, b, x, ty, c2);
     }
-    if ((t2 >= 0 ? t2 : t1) > 0) customText(&g, FACE_MED, "m", x + 1, ty, t2 >= 0 ? c2 : c1);
+    if ((t2 >= 0 ? t2 : t1) > 0) x += 1 + customText(&g, FACE_MED, "m", x + 1, ty, t2 >= 0 ? c2 : c1);
   }
 
-  g.drawFastHLine(2, 17, 60, C_RULE);
+  // Right end of the top line: warning triangle (problem) or direction code
+  const char* alert = bus ? t.bAlert : t.lAlert;
+  if (alert[0]) {
+    blit(g, WARN, 7, SCREEN_W - 3 - 7, BY + 2, alertColor(bus ? t.bSev : t.lSev));
+  } else {
+    const char* code = bus ? t.bLabel : t.lLabel;          // MN / BK / NB / SB
+    const int cw = textWidth(FACE_SMALL, code);
+    if (x + 3 + cw <= SCREEN_W - 2) customText(&g, FACE_SMALL, code, SCREEN_W - 2 - cw, BY + BD - 5, C_LABEL);
+  }
 
-  // Clock (rows 18..31) in the chosen style; Huge isn't possible here.
+  // Clock: rows 16..29, in the chosen style (Huge doesn't fit here -> Station)
   const ClockStyle& st = gClock;
-  ClockFont f = st.font == CLOCK_HUGE ? CLOCK_STATION : st.font;
+  const ClockFont f = st.font == CLOCK_HUGE ? CLOCK_STATION : st.font;
   char tbuf[8];
   if (!now || !now->valid) snprintf(tbuf, sizeof tbuf, "--:--");
   else if (st.h24) snprintf(tbuf, sizeof tbuf, "%02d:%02d", now->hour, now->minute);
   else { int h12 = now->hour % 12; if (!h12) h12 = 12; snprintf(tbuf, sizeof tbuf, "%d:%02d", h12, now->minute); }
-  const int cy = 18, ch = 14;
+  const int cy = 16, ch = 14;
   ClockPaint paint{st, ms, cy, cy + ch - 1};
   const bool colonOn = !st.blink || !now || !now->valid || now->second % 2 == 0;
-  const int cw = drawClockText(&g, paint, f, tbuf, 2, cy, colonOn, 14);
+  const int cw = drawClockText(nullptr, paint, f, tbuf, 0, cy, colonOn, 14);
 
-  // Date on the right, if there's room
+  // Date to the right of the time (two short lines), if it fits; the pair is centered.
+  char day[4] = "", md[8] = "";
+  int dw = 0;
   if (st.date && now && now->valid) {
-    char md[8];
+    snprintf(day, sizeof day, "%s", DAYS[now->wday % 7]);
     snprintf(md, sizeof md, "%s %d", MONTHS[now->mon % 12], now->mday);
-    const char* day = DAYS[now->wday % 7];
-    const int w = textWidth(FACE_SMALL, md) > textWidth(FACE_SMALL, day) ? textWidth(FACE_SMALL, md) : textWidth(FACE_SMALL, day);
-    if (2 + cw + 4 + w <= SCREEN_W - 1) {
-      const int rx = SCREEN_W - 2;
-      customText(&g, FACE_SMALL, day, rx - textWidth(FACE_SMALL, day), cy + 1, paint.dim(65));
-      customText(&g, FACE_SMALL, md, rx - textWidth(FACE_SMALL, md), cy + 8, paint.dim(65));
-    }
-  } else if (!st.h24 && st.ampm && now && now->valid) {
-    customText(&g, FACE_SMALL, now->hour < 12 ? "AM" : "PM", 2 + cw + 2, cy + ch - 5, paint.at(2 + cw, cy + ch - 1));
+    dw = textWidth(FACE_SMALL, md) > textWidth(FACE_SMALL, day) ? textWidth(FACE_SMALL, md) : textWidth(FACE_SMALL, day);
+  }
+  const char* ampm = (!st.h24 && st.ampm && now && now->valid) ? (now->hour < 12 ? "AM" : "PM") : nullptr;
+  const int gap = 5;
+  const bool dateFits = dw && cw + gap + dw <= SCREEN_W - 4;
+  const int aw = ampm ? 2 + textWidth(FACE_SMALL, ampm) : 0;
+  const int groupW = dateFits ? cw + gap + dw : cw + (ampm && cw + aw <= SCREEN_W - 4 ? aw : 0);
+  const int cx = (SCREEN_W - groupW) / 2;
+  drawClockText(&g, paint, f, tbuf, cx, cy, colonOn, 14);
+  if (dateFits) {
+    customText(&g, FACE_SMALL, day, cx + cw + gap, cy + 1, paint.dim(65));
+    customText(&g, FACE_SMALL, md, cx + cw + gap, cy + 8, paint.dim(65));
+  } else if (ampm && cw + aw <= SCREEN_W - 4) {
+    customText(&g, FACE_SMALL, ampm, cx + cw + 2, cy + ch - 5, paint.at(cx + cw, cy + ch - 1));
   }
 }
 

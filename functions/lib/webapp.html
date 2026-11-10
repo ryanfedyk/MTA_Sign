@@ -48,7 +48,8 @@
   .led.big .second { color: #e6a028; font-size: 20px; margin-left: 2px; }
   .legend { margin-top: 10px; font-size: 12px; color: var(--muted); display: flex; gap: 14px; }
   .legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
-  .heroclock { border-top: 1px solid #2a2622; margin-top: 4px; padding-top: 10px; color: #ffe1aa; font-size: 30px; font-weight: 700; display: flex; justify-content: space-between; align-items: center; }
+  .heroclock { margin-top: 10px; color: #ffe1aa; font-size: 34px; font-weight: 700; display: flex; justify-content: center; align-items: center; gap: 16px; }
+  .dcode { margin-left: auto; color: #b4b4b4; font: 600 14px ui-monospace, monospace; align-self: center; }
   .heroclock span { font-size: 14px; color: #a49a8c; font-weight: 500; }
   .led.clockmode { padding: 0; min-height: 0; overflow: hidden; }
   .clockface { text-align: center; font-size: 46px; font-weight: 700; color: #ffe1aa; letter-spacing: .02em; line-height: 1; }
@@ -684,8 +685,8 @@ async function refreshPreview() {
       const t = (v) => (v === 0 ? "AR" : v), n = new Date();
       led.className = "led big";
       led.innerHTML = `<div class="row"><div class="badge b" style="border-radius:12px;font-size:17px">B48</div><div>
-        <div class="dname">${d.b.dir === "NB" ? "Northbound" : "Southbound"}</div>
-        <div class="times">${d.b.t1 < 0 ? '<span class="none">– –</span>' : `<span class="${d.b.live1 ? "live" : "sched"}" style="font-size:26px">${t(d.b.t1)}${d.b.t2 >= 0 ? ", " + t(d.b.t2) : ""}m</span>`}</div></div></div>
+        <div class="times">${d.b.t1 < 0 ? '<span class="none">– –</span>' : `<span class="${d.b.live1 ? "live" : "sched"}" style="font-size:26px">${t(d.b.t1)}${d.b.t2 >= 0 ? ", " + t(d.b.t2) : ""}m</span>`}</div></div>
+        <span class="dcode">${d.ba ? "⚠" : d.b.dir}</span></div>
         <div class="heroclock">${n.getHours() % 12 || 12}:${String(n.getMinutes()).padStart(2, "0")}<span>${n.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).replace(",", "")}</span></div>`;
     } else if (d.lay === "B") {
       const t = (v) => (v === 0 ? "AR" : v);
@@ -697,8 +698,8 @@ async function refreshPreview() {
       const t = (v) => (v === 0 ? "AR" : v), n = new Date();
       led.className = "led big";
       led.innerHTML = `<div class="row"><div class="badge l">L</div><div>
-        <div class="dname">${d.l.dir === "BK" ? "Brooklyn" : "Manhattan"}</div>
-        <div class="times">${d.l.t1 < 0 ? '<span class="none">– –</span>' : `<span class="live" style="font-size:26px">${t(d.l.t1)}${d.l.t2 >= 0 ? ", " + t(d.l.t2) : ""}m</span>`}</div></div></div>
+        <div class="times">${d.l.t1 < 0 ? '<span class="none">– –</span>' : `<span class="live" style="font-size:26px">${t(d.l.t1)}${d.l.t2 >= 0 ? ", " + t(d.l.t2) : ""}m</span>`}</div></div>
+        <span class="dcode">${d.la ? "⚠" : d.l.dir}</span></div>
         <div class="heroclock">${n.getHours() % 12 || 12}:${String(n.getMinutes()).padStart(2, "0")}<span>${n.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).replace(",", "")}</span></div>`;
     } else if (d.lay === "L") {
       const names = { MN: "Manhattan", BK: "Brooklyn" };
