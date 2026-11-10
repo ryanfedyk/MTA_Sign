@@ -53,6 +53,18 @@ AnimKind animFromName(const char* name);   // "walk", "chase", "peek" (unknown -
 // Screens
 // `detail` is a short status line, e.g. "WIFI", "LOADING", "ERR -1".
 void drawConnecting(Adafruit_GFX& g, uint32_t ms, const char* detail = nullptr, const char* title = "CONNECTING");
+// Clock look, set from the app (sent by the cloud in /sign as "ck").
+enum ClockFont : uint8_t { CLOCK_STATION = 0, CLOCK_SEGMENT, CLOCK_RETRO, CLOCK_HUGE };
+enum ClockColorMode : uint8_t { CLOCK_SOLID = 0, CLOCK_GRADIENT, CLOCK_RAINBOW };
+struct ClockStyle {
+  ClockFont font = CLOCK_STATION;
+  uint8_t r = 255, g = 225, b = 170;          // main color (warm white)
+  uint8_t r2 = 255, g2 = 125, b2 = 15;        // second color for gradients
+  ClockColorMode mode = CLOCK_SOLID;
+  bool h24 = false, ampm = false, date = true, blink = true, secBar = false;
+};
+void setClockStyle(const ClockStyle& style);
+
 // `ms` drives blinking/alternating indicators; `now` is needed for the clock.
 void drawTransit(Adafruit_GFX& g, const TransitData& t, uint32_t ms = 0, const ClockTime* now = nullptr);
 

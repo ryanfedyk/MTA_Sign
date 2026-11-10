@@ -101,6 +101,7 @@ struct SignSettings {
   uint32_t animId = 0;             // changes each time the app presses "Play"
   char animName[40] = "";          // built-in name, or "c:<id>" for a cloud animation
   uint32_t libVersion = 0;         // cloud animation library version
+  ClockStyle clock;                // clock look from the app
   uint32_t msgId = 0;              // changes each time the app sends a message
   char msgText[MAX_MSG + 1] = "";
   uint8_t msgRepeat = 2;
@@ -301,6 +302,21 @@ static void fetchSign() {
   s.idleSec     = doc["ie"] | 30;
   copyStr(s.idleAnim, sizeof s.idleAnim, doc["is"] | "walk");
   s.libVersion = doc["lv"] | 0;
+  if (doc["ck"].is<JsonObjectConst>()) {
+    JsonObjectConst ck = doc["ck"];
+    const char* f = ck["f"] | "station";
+    s.clock.font = !strcmp(f, "segment") ? CLOCK_SEGMENT : !strcmp(f, "retro") ? CLOCK_RETRO : !strcmp(f, "huge") ? CLOCK_HUGE : CLOCK_STATION;
+    uint32_t c1 = strtoul(ck["c"] | "ffe1aa", nullptr, 16), c2 = strtoul(ck["c2"] | "ff7d0f", nullptr, 16);
+    s.clock.r = c1 >> 16; s.clock.g = (c1 >> 8) & 0xFF; s.clock.b = c1 & 0xFF;
+    s.clock.r2 = c2 >> 16; s.clock.g2 = (c2 >> 8) & 0xFF; s.clock.b2 = c2 & 0xFF;
+    const char* m = ck["m"] | "solid";
+    s.clock.mode = !strcmp(m, "gradient") ? CLOCK_GRADIENT : !strcmp(m, "rainbow") ? CLOCK_RAINBOW : CLOCK_SOLID;
+    s.clock.h24 = (ck["h24"] | 0) == 1;
+    s.clock.ampm = (ck["ap"] | 0) == 1;
+    s.clock.date = (ck["d"] | 1) == 1;
+    s.clock.blink = (ck["b"] | 1) == 1;
+    s.clock.secBar = (ck["sb"] | 0) == 1;
+  }
   if (doc["a"].is<JsonObject>()) {
     s.animId = doc["a"]["i"] | 0;
     copyStr(s.animName, sizeof s.animName, doc["a"]["n"] | "");
@@ -532,6 +548,7 @@ void loop() {
   xSemaphoreGive(gLock);
 
   if (now - lastBrightness > 1000) { lastBrightness = now; updateBrightness(s); }
+  setClockStyle(s.clock);
 
   static ClockTime clockNow;
   struct tm ti;

@@ -41,6 +41,14 @@ problem**. Arrival screens also flash the problem in place of the direction labe
 Problems come from the MTA's GTFS-realtime service-alert feeds. If the MTA ever
 requires a key, add it as the `MTA_API_KEY` secret.
 
+**Clock style** (Settings) controls how the clock looks. The app preview uses the
+sign's exact pixel fonts.
+- **Typeface:** Station (countdown-clock digits), Segment (a retro digital clock with
+  faint unlit segments), Retro (chunky classic pixels), or Huge (fills the sign).
+- **Color:** presets or any custom color.
+- **Effect:** solid, a two-color gradient, or a slowly shifting rainbow.
+- **Options:** 12/24-hour, AM/PM, date, blinking colon, and a seconds bar.
+
 **Reset to original** restores the rules below.
 
 ## What the sign shows

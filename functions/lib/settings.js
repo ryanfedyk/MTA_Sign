@@ -15,10 +15,16 @@ const DEFAULTS = Object.freeze({
   // nightStart to nightEnd (local hours, wrapping past midnight).
   brightness: { day: 12, night: 5, nightStart: 17, nightEnd: 7 },
   idle: { every: 30, style: "walk" },  // seconds between idle cats; 0 = off
+  // Clock look (used by "clock" schedule blocks)
+  clock: { font: "station", color: "#ffe1aa", color2: "#ff7d0f", effect: "solid",
+           h24: false, ampm: false, date: true, blink: true, secBar: false },
   anim: null,                          // {seq, name, at}
   msg: null,                           // {seq, text, repeat, at}
   device: null,                        // {lastSeen}
 });
+
+const CLOCK_FONTS = ["station", "segment", "retro", "huge"];
+const CLOCK_EFFECTS = ["solid", "gradient", "rainbow"];
 
 const LIMITS = { brightness: [1, 64], idleEvery: [0, 3600], msgLength: 80, repeat: [1, 5] };
 
@@ -33,6 +39,7 @@ function withDefaults(data = {}) {
   return {
     brightness: { ...DEFAULTS.brightness, ...(data.brightness || {}) },
     idle: { ...DEFAULTS.idle, ...(data.idle || {}) },
+    clock: { ...DEFAULTS.clock, ...(data.clock || {}) },
     anim: data.anim || null,
     msg: data.msg || null,
     device: data.device || null,
@@ -84,6 +91,19 @@ function validatePatch(body = {}) {
       patch.idle.style = body.idle.style;
     }
   }
+  if (body.clock) {
+    const c = body.clock, out = {};
+    if (c.font !== undefined) { if (!CLOCK_FONTS.includes(c.font)) throw new Error("unknown clock font"); out.font = c.font; }
+    if (c.effect !== undefined) { if (!CLOCK_EFFECTS.includes(c.effect)) throw new Error("unknown clock effect"); out.effect = c.effect; }
+    for (const k of ["color", "color2"]) {
+      if (c[k] !== undefined) {
+        if (!/^#[0-9a-f]{6}$/i.test(String(c[k]))) throw new Error(`clock.${k} must look like #rrggbb`);
+        out[k] = String(c[k]).toLowerCase();
+      }
+    }
+    for (const k of ["h24", "ampm", "date", "blink", "secBar"]) if (c[k] !== undefined) out[k] = Boolean(c[k]);
+    patch.clock = out;
+  }
   return patch;
 }
 
@@ -96,7 +116,12 @@ function deviceView(cfg, nowMs = Date.now()) {
     ne: cfg.brightness.nightEnd,     // ...until this hour (local time)
     ie: cfg.idle.every,
     is: cfg.idle.style,
-    lv: cfg.lib.v % 1e9,  // animation library version (fits 32 bits); the sign re-downloads /anims when it changes
+    lv: cfg.lib.v % 1e9,
+    ck: {
+      f: cfg.clock.font, c: cfg.clock.color.slice(1), c2: cfg.clock.color2.slice(1), m: cfg.clock.effect,
+      h24: cfg.clock.h24 ? 1 : 0, ap: cfg.clock.ampm ? 1 : 0, d: cfg.clock.date ? 1 : 0,
+      b: cfg.clock.blink ? 1 : 0, sb: cfg.clock.secBar ? 1 : 0,
+    },  // animation library version (fits 32 bits); the sign re-downloads /anims when it changes
   };
   if (cfg.anim && nowMs - cfg.anim.at < ANIM_FRESH_MS) out.a = { i: cfg.anim.seq, n: cfg.anim.name };
   if (cfg.msg && nowMs - cfg.msg.at < MSG_FRESH_MS) out.m = { i: cfg.msg.seq, t: cfg.msg.text, r: cfg.msg.repeat };
@@ -108,6 +133,7 @@ function appView(cfg, nowMs = Date.now()) {
   return {
     brightness: cfg.brightness,
     idle: cfg.idle,
+    clock: cfg.clock,
     lastSeenSecondsAgo: cfg.device?.lastSeen ? Math.round((nowMs - cfg.device.lastSeen) / 1000) : null,
     firmware: cfg.device?.fw ?? null,
     animations: ANIMATIONS,
@@ -229,7 +255,7 @@ function memoryStore(initial = {}) {
 }
 
 module.exports = {
-  ANIMATIONS, IDLE_STYLES, DEFAULTS, LIMITS,
+  ANIMATIONS, IDLE_STYLES, DEFAULTS, LIMITS, CLOCK_FONTS, CLOCK_EFFECTS,
   withDefaults, cleanMessage, validatePatch, deviceView, appView,
   firestoreStore, memoryStore,
 };

@@ -82,6 +82,28 @@ int main(int argc, char** argv) {
     TransitData two = wk; strcpy(two.lAlert, "Delays"); two.lSev = 1; drawTransit(p, two, 0, &ck); p.dump(f); frames++;
     TransitData one = we; strcpy(one.lAlert, "Delays"); one.lSev = 1; drawTransit(p, one, 0, &ck); p.dump(f); frames++;
   }
+  else if (scene == "clock-styles") {     // one frame per typeface / color / option combo
+    ClockTime ck; ck.valid = true; ck.hour = 22; ck.minute = 48; ck.second = 30; ck.wday = 2; ck.mon = 10; ck.mday = 10;
+    TransitData c = wk; c.layout = LAYOUT_CLOCK;
+    struct V { ClockFont f; uint8_t r, g, b, r2, g2, b2; ClockColorMode m; bool h24, ampm, date, sec; };
+    V vs[] = {
+      {CLOCK_STATION, 255, 225, 170, 0, 0, 0, CLOCK_SOLID, false, true, true, false},
+      {CLOCK_SEGMENT, 255, 60, 40, 0, 0, 0, CLOCK_SOLID, false, false, true, false},
+      {CLOCK_RETRO, 120, 255, 140, 0, 0, 0, CLOCK_SOLID, true, false, true, true},
+      {CLOCK_HUGE, 255, 225, 170, 255, 110, 20, CLOCK_GRADIENT, false, false, false, true},
+      {CLOCK_SEGMENT, 140, 200, 255, 0, 0, 0, CLOCK_SOLID, true, false, false, true},
+      {CLOCK_HUGE, 0, 0, 0, 0, 0, 0, CLOCK_RAINBOW, false, false, false, false},
+    };
+    for (auto& v : vs) {
+      ClockStyle st; st.font = v.f; st.r = v.r; st.g = v.g; st.b = v.b; st.r2 = v.r2; st.g2 = v.g2; st.b2 = v.b2;
+      st.mode = v.m; st.h24 = v.h24; st.ampm = v.ampm; st.date = v.date; st.secBar = v.sec;
+      setClockStyle(st); drawTransit(p, c, 1200, &ck); p.dump(f); frames++;
+    }
+    ClockStyle st; st.font = CLOCK_SEGMENT; setClockStyle(st);
+    strcpy(c.lAlert, "Delays"); c.lSev = 1; drawTransit(p, c, 0, &ck); p.dump(f); frames++;
+    st.font = CLOCK_HUGE; setClockStyle(st); drawTransit(p, c, 0, &ck); p.dump(f); frames++;
+    setClockStyle(ClockStyle());
+  }
   else if (scene == "bus-cases") {        // B48 full screen: live/scheduled mixes
     TransitData bu = wk; bu.layout = LAYOUT_BUS;
     int cases[][4] = {{7, 22, 1, 0}, {12, 31, 1, 1}, {0, 9, 1, 0}, {-1, -1, 1, 1}};

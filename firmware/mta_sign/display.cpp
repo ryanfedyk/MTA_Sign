@@ -454,34 +454,144 @@ static void drawBusOnly(Adafruit_GFX& g, const TransitData& t, uint32_t ms) {
 static const char* const DAYS[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 static const char* const MONTHS[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 
-static void drawClock(Adafruit_GFX& g, const TransitData& t, uint32_t ms, const ClockTime* now) {
-  if (!now || !now->valid) {                       // no NTP yet
-    customText(&g, FACE_BIG, "--:--", (SCREEN_W - textWidth(FACE_BIG, "--:--")) / 2, 6, C_DIM);
-    return;
+static ClockStyle gClock;
+void setClockStyle(const ClockStyle& style) { gClock = style; }
+
+static uint16_t hsv565(int hue) {               // full saturation/value rainbow
+  hue %= 360; int x = (hue % 60) * 255 / 60;
+  int r, g, b;
+  switch (hue / 60) {
+    case 0: r = 255; g = x; b = 0; break;     case 1: r = 255 - x; g = 255; b = 0; break;
+    case 2: r = 0; g = 255; b = x; break;     case 3: r = 0; g = 255 - x; b = 255; break;
+    case 4: r = x; g = 0; b = 255; break;     default: r = 255; g = 0; b = 255 - x; break;
   }
+  return rgb565(r, g, b);
+}
+
+// Color for each pixel of the time: solid, a vertical gradient, or a moving rainbow.
+struct ClockPaint {
+  const ClockStyle& st; uint32_t ms; int top, bottom;
+  uint16_t at(int x, int y) const {
+    if (st.mode == CLOCK_RAINBOW) return hsv565(ms / 40 + x * 5);
+    if (st.mode == CLOCK_GRADIENT && bottom > top) {
+      int f = (y - top) * 256 / (bottom - top); if (f < 0) f = 0; if (f > 256) f = 256;
+      return rgb565(st.r + (st.r2 - st.r) * f / 256, st.g + (st.g2 - st.g) * f / 256, st.b + (st.b2 - st.b) * f / 256);
+    }
+    return rgb565(st.r, st.g, st.b);
+  }
+  uint16_t dim(int pct) const {                // for the date / seconds bar
+    if (st.mode == CLOCK_RAINBOW) return rgb565(150, 150, 150);
+    return rgb565(st.r * pct / 100, st.g * pct / 100, st.b * pct / 100);
+  }
+};
+
+// ---- clock typefaces ----
+static int clockHeight(ClockFont f) { return f == CLOCK_HUGE ? 28 : f == CLOCK_SEGMENT ? 16 : 14; }
+static int clockGap(ClockFont f) { return f == CLOCK_HUGE ? 3 : f == CLOCK_SEGMENT ? 3 : 2; }
+
+// Seven-segment digits (9x16, 2-px segments). Unlit segments glow faintly.
+static const uint8_t SEGMENTS[10] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F};   // bits: a b c d e f g
+static void segRect(Adafruit_GFX* g, const ClockPaint& p, int x, int y, int w, int h, bool lit) {
+  if (!g) return;
+  for (int yy = y; yy < y + h; yy++)
+    for (int xx = x; xx < x + w; xx++) {
+      uint16_t c = p.at(xx, yy);
+      if (!lit) {   // ghost segment: ~10% brightness
+        c = rgb565(((c >> 11) << 3) / 10, (((c >> 5) & 63) << 2) / 10, ((c & 31) << 3) / 10);
+      }
+      g->drawPixel(xx, yy, c);
+    }
+}
+static int drawSegDigit(Adafruit_GFX* g, const ClockPaint& p, int d, int x, int y) {
+  const int W = 9, H = 16, T = 2, M = H / 2;
+  uint8_t on = (d >= 0 && d <= 9) ? SEGMENTS[d] : 0x40;   // '-' = middle segment only
+  segRect(g, p, x + T, y, W - 2 * T, T, on & 0x01);                 // a
+  segRect(g, p, x + W - T, y + T, T, M - T - 1, on & 0x02);         // b
+  segRect(g, p, x + W - T, y + M + 1, T, M - T - 1, on & 0x04);     // c
+  segRect(g, p, x + T, y + H - T, W - 2 * T, T, on & 0x08);         // d
+  segRect(g, p, x, y + M + 1, T, M - T - 1, on & 0x10);             // e
+  segRect(g, p, x, y + T, T, M - T - 1, on & 0x20);                 // f
+  segRect(g, p, x + T, y + M - 1, W - 2 * T, T, on & 0x40);         // g
+  return W;
+}
+
+// Bitmap glyph at an integer scale, colored per pixel.
+static int drawScaledGlyph(Adafruit_GFX* g, const ClockPaint& p, const char* const* rows, int h, int scale, int x, int y) {
+  int w = (int)strlen(rows[0]);
+  if (g)
+    for (int r = 0; r < h; r++)
+      for (int c = 0; c < w; c++)
+        if (rows[r][c] == '#')
+          for (int sy = 0; sy < scale; sy++)
+            for (int sx = 0; sx < scale; sx++) {
+              int X = x + c * scale + sx, Y = y + r * scale + sy;
+              g->drawPixel(X, Y, p.at(X, Y));
+            }
+  return w * scale;
+}
+
+// Draws (or measures, with g = null) the time string in a clock typeface.
+// `colonOn` false leaves the colon's space empty (blinking).
+static int drawClockText(Adafruit_GFX* g, const ClockPaint& p, ClockFont f, const char* s, int x, int y, bool colonOn) {
+  int cx = x;
+  for (const char* q = s; *q; q++) {
+    const bool colon = *q == ':';
+    int w = 0;
+    if (f == CLOCK_SEGMENT) {
+      if (colon) { w = 2; if (g && colonOn) { segRect(g, p, cx, y + 4, 2, 2, true); segRect(g, p, cx, y + 10, 2, 2, true); } }
+      else w = drawSegDigit(g, p, *q == '-' ? -1 : *q - '0', cx, y);
+    } else if (f == CLOCK_RETRO) {
+      const char* const* rows = findGlyph(RETRO_FONT, *q);
+      if (rows) w = drawScaledGlyph(colon && !colonOn ? nullptr : g, p, rows, RETRO_H, 2, cx, y);
+    } else {
+      const char* const* rows = findGlyph(BIG_FONT, *q);
+      int scale = f == CLOCK_HUGE ? 2 : 1;
+      if (rows) w = drawScaledGlyph(colon && !colonOn ? nullptr : g, p, rows, BIG_H, scale, cx, y);
+    }
+    cx += w + (q[1] ? clockGap(f) : 0);
+  }
+  return cx - x;
+}
+
+static void drawClock(Adafruit_GFX& g, const TransitData& t, uint32_t ms, const ClockTime* now) {
+  const ClockStyle& st = gClock;
   const bool hasL = t.lAlert[0], hasB = t.bAlert[0];
   const bool alert = hasL || hasB;
+  ClockFont f = st.font;
+  if (f == CLOCK_HUGE && alert) f = CLOCK_STATION;          // make room for the problem
+  const bool showDate = st.date && !alert && f != CLOCK_HUGE;
+  const bool bottomLine = showDate || alert;
 
-  // Time (12-hour), centred; colon blinks once a second.
-  int h12 = now->hour % 12; if (h12 == 0) h12 = 12;
-  char hh[4], mm[4];
-  snprintf(hh, sizeof hh, "%d", h12);
-  snprintf(mm, sizeof mm, "%02d", now->minute);
-  const int colonW = 2, gap = 2;
-  const int w = textWidth(FACE_BIG, hh) + gap + colonW + gap + textWidth(FACE_BIG, mm);
-  const int x0 = (SCREEN_W - w) / 2, y0 = alert ? 3 : 5;
-  const uint16_t timeColor = rgb565(255, 225, 170);            // warm white
-  int x = x0 + customText(&g, FACE_BIG, hh, x0, y0, timeColor) + gap;
-  if (now->second % 2 == 0) customText(&g, FACE_BIG, ":", x, y0, timeColor);
-  x += colonW + gap;
-  customText(&g, FACE_BIG, mm, x, y0, timeColor);
+  char tbuf[8];
+  if (!now || !now->valid) snprintf(tbuf, sizeof tbuf, "--:--");
+  else if (st.h24) snprintf(tbuf, sizeof tbuf, "%02d:%02d", now->hour, now->minute);
+  else { int h12 = now->hour % 12; if (!h12) h12 = 12; snprintf(tbuf, sizeof tbuf, "%d:%02d", h12, now->minute); }
+  const char* ampm = (now && now->valid && !st.h24 && st.ampm) ? (now->hour < 12 ? "AM" : "PM") : nullptr;
 
-  if (!alert) {
+  const int th = clockHeight(f);
+  ClockPaint paint{st, ms, 0, th - 1};
+  const int tw = drawClockText(nullptr, paint, f, tbuf, 0, 0, true);
+  const int aw = ampm ? 2 + textWidth(FACE_SMALL, ampm) : 0;
+  const int x0 = (SCREEN_W - (tw + aw)) / 2;
+  const int y0 = bottomLine ? (alert ? 3 : (f == CLOCK_SEGMENT ? 3 : 4)) : (SCREEN_H - th) / 2 - (st.secBar ? 1 : 0);
+  paint.top = y0; paint.bottom = y0 + th - 1;
+
+  const bool colonOn = !st.blink || !now || !now->valid || now->second % 2 == 0;
+  drawClockText(&g, paint, f, tbuf, x0, y0, colonOn);
+  if (ampm) customText(&g, FACE_SMALL, ampm, x0 + tw + 2, y0 + th - 5, paint.at(x0 + tw, y0 + th - 1));
+
+  if (st.secBar && now && now->valid) {
+    int w = (now->second + 1) * SCREEN_W / 60;
+    for (int x = 0; x < w; x++) g.drawPixel(x, SCREEN_H - 1, paint.dim(45));
+  }
+
+  if (showDate && now && now->valid) {
     char date[16];
     snprintf(date, sizeof date, "%s %s %d", DAYS[now->wday % 7], MONTHS[now->mon % 12], now->mday);
-    customText(&g, FACE_SMALL, date, (SCREEN_W - textWidth(FACE_SMALL, date)) / 2, 23, C_LABEL);
+    customText(&g, FACE_SMALL, date, (SCREEN_W - textWidth(FACE_SMALL, date)) / 2, 23, paint.dim(65));
     return;
   }
+  if (!alert) return;
 
   // Indicator strip: bullet + label. With two problems, alternate every 3 s.
   const bool showL = hasL && (!hasB || (ms / 3000) % 2 == 0);

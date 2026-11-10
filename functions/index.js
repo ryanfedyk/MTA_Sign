@@ -122,7 +122,9 @@ exports.anims = onRequest(HTTP_OPTS, async (req, res) => {
 // ---------------------------------------------------------------------------
 // /app  (control panel)
 // ---------------------------------------------------------------------------
-const APP_HTML = fs.readFileSync(path.join(__dirname, "lib", "webapp.html"), "utf8");
+// The sign's own pixel fonts are embedded so app previews match the panel exactly.
+const APP_HTML = fs.readFileSync(path.join(__dirname, "lib", "webapp.html"), "utf8")
+  .replace("/*SIGN_FONTS*/null", fs.readFileSync(path.join(__dirname, "lib", "signfonts.json"), "utf8").trim());
 
 function pinOk(given) {
   const expected = process.env.SIGN_APP_PIN;

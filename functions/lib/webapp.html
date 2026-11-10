@@ -48,6 +48,7 @@
   .led.big .second { color: #e6a028; font-size: 20px; margin-left: 2px; }
   .legend { margin-top: 10px; font-size: 12px; color: var(--muted); display: flex; gap: 14px; }
   .legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+  .led.clockmode { padding: 0; min-height: 0; overflow: hidden; }
   .clockface { text-align: center; font-size: 46px; font-weight: 700; color: #ffe1aa; letter-spacing: .02em; line-height: 1; }
   .clockdate { text-align: center; color: #b4b4b4; font-size: 15px; margin-top: 8px; display: flex; justify-content: center; gap: 10px; }
   .alertchip { display: inline-flex; align-items: center; gap: 6px; color: var(--amber); font-weight: 600; font-size: 14px; }
@@ -190,6 +191,16 @@
   .rname { font-weight: 650; margin-top: 10px; }
   .stickyprev { position: sticky; top: calc(106px + env(safe-area-inset-top)); z-index: 3; padding: 4px 0 10px; margin: 0 -2px;
     background: var(--card); box-shadow: 0 -16px 0 var(--card); }
+  .swatches { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .swatch { width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--card); box-shadow: 0 0 0 1px var(--line); cursor: pointer; padding: 0; }
+  .swatch.sel { box-shadow: 0 0 0 2px var(--text); }
+  .swatch.custom { background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); position: relative; overflow: hidden; }
+  .swatch.custom input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .toggles { margin-top: 14px; }
+  .toggles label { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); font-size: 15px; }
+  .ledcv.framed { border: 9px solid transparent; border-radius: 16px;
+    background: linear-gradient(var(--screen), var(--screen)) padding-box,
+                repeating-linear-gradient(93deg, #c49c6e 0 3px, #bf9667 3px 7px, #c8a174 7px 9px, #bd9364 9px 14px) border-box; }
   .kv { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
   .kv span:first-child { color: var(--muted); }
   .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: flex; justify-content: center; gap: 4px;
@@ -396,6 +407,26 @@
         </div>
       </section>
 
+      <section class="card" id="clockCard">
+        <h2>Clock style</h2>
+        <p class="sub">For schedule blocks set to <b>Clock</b>.</p>
+        <canvas class="ledcv framed" id="clockCv" width="650" height="330"></canvas>
+        <div class="lbl">Typeface</div>
+        <div class="seg" id="ckFont"><button data-v="station">Station</button><button data-v="segment">Segment</button><button data-v="retro">Retro</button><button data-v="huge">Huge</button></div>
+        <div class="lbl">Color</div>
+        <div class="swatches" id="ckColor"></div>
+        <div class="lbl">Effect</div>
+        <div class="seg" id="ckEffect"><button data-v="solid">Solid</button><button data-v="gradient">Gradient</button><button data-v="rainbow">Rainbow</button></div>
+        <div id="ckColor2Wrap" class="hidden"><div class="lbl">Fades to</div><div class="swatches" id="ckColor2"></div></div>
+        <div class="toggles">
+          <label><span>24-hour</span><span class="switch"><input type="checkbox" data-ck="h24"><i></i></span></label>
+          <label><span>AM / PM</span><span class="switch"><input type="checkbox" data-ck="ampm"><i></i></span></label>
+          <label><span>Date</span><span class="switch"><input type="checkbox" data-ck="date"><i></i></span></label>
+          <label><span>Blinking colon</span><span class="switch"><input type="checkbox" data-ck="blink"><i></i></span></label>
+          <label><span>Seconds bar</span><span class="switch"><input type="checkbox" data-ck="secBar"><i></i></span></label>
+        </div>
+      </section>
+
       <section class="card" id="schedCard">
         <h2>Schedule</h2>
         <p class="sub">Showing now: <b id="schedNow" class="amber">…</b></p>
@@ -514,6 +545,7 @@ function render() {
     + (S.firmware ? " · v" + S.firmware : "");
   $("devStatus").textContent = ago === null ? "Never seen" : online ? `Online (checked in ${ago}s ago)` : "Offline · last seen " + fmtAgo(ago);
   $("devFw").textContent = S.firmware ? "v" + S.firmware : "—";
+  if (S.clock && !ckLoaded) { ckLoaded = true; CK = { ...S.clock }; renderClockCard(); }
 }
 function fmtAgo(s) { return s < 3600 ? Math.round(s / 60) + " min ago" : s < 86400 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " d ago"; }
 
@@ -601,6 +633,11 @@ function timesHtml(t1, t2, live1, live2) {
   if (t2 >= 0) h += `<span class="none">, </span><span class="${cls(live2)}">${fmt(t2)}</span>`;
   return h;
 }
+let lastTransit = null;
+function drawHeroClock() {
+  const cv = document.querySelector("#led canvas");
+  if (cv && SIGN_FONTS) paintLed(cv, renderClockImage(CK || { font: "station", color: "#ffe1aa", color2: "#ff7d0f", effect: "solid", date: true, blink: true }, new Date(), lastTransit, performance.now()));
+}
 async function refreshPreview() {
   try {
     const d = await (await fetch(TRANSIT_URL)).json();
@@ -608,10 +645,11 @@ async function refreshPreview() {
     const alertHtml = [["L", d.la, d.ls, "l"], ["B48", d.ba, d.bs, "b"]].filter((x) => x[1])
       .map(([r, label, sev, cls]) => `<span class="alertchip ${sev >= 2 ? "red" : ""}"><span class="badge ${cls}" style="width:18px;height:18px;font-size:11px">${r === "L" ? "L" : "B"}</span>${label}</span>`).join("");
     $("alertline").innerHTML = d.lay === "clock" ? "" : alertHtml;
+    lastTransit = d;
     if (d.lay === "clock") {
-      const n = new Date(), h = n.getHours() % 12 || 12, m = String(n.getMinutes()).padStart(2, "0");
-      led.className = "led";
-      led.innerHTML = `<div class="clockface">${h}:${m}</div><div class="clockdate">${alertHtml || n.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).replace(",", "")}</div>`;
+      led.className = "led clockmode";
+      if (!led.querySelector("canvas")) led.innerHTML = '<canvas width="650" height="330" style="width:100%;height:auto;display:block"></canvas>';
+      drawHeroClock();
       return;
     }
     if (d.lay === "off") {
@@ -1089,6 +1127,124 @@ $("saveSched").onclick = async () => {
   } catch (e) { if (e.message !== "locked") toast(e.message); }
   finally { $("saveSched").disabled = false; }
 };
+
+// ---- the sign's clock, drawn with the sign's own fonts (mirrors display.cpp) ----
+const SIGN_FONTS = /*SIGN_FONTS*/null;
+const CK_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const CK_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const SEGS = [0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F];
+
+function renderClockImage(st, now, alerts, ms) {
+  const img = new ImageData(W, H);
+  for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;
+  const put = (x, y, c) => { if (x < 0 || y < 0 || x >= W || y >= H) return; const i = (y * W + x) * 4; img.data[i] = c[0]; img.data[i + 1] = c[1]; img.data[i + 2] = c[2]; };
+  const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+  const c1 = hex(st.color), c2 = hex(st.color2);
+  const hsv = (h) => { h = ((h % 360) + 360) % 360; const x = Math.floor((h % 60) * 255 / 60);
+    return [[255, x, 0], [255 - x, 255, 0], [0, 255, x], [0, 255 - x, 255], [x, 0, 255], [255, 0, 255 - x]][Math.floor(h / 60)]; };
+  let top = 0, bottom = 13;
+  const at = (x, y) => {
+    if (st.effect === "rainbow") return hsv(Math.floor(ms / 40) + x * 5);
+    if (st.effect === "gradient" && bottom > top) { const f = Math.min(1, Math.max(0, (y - top) / (bottom - top))); return c1.map((v, i) => Math.round(v + (c2[i] - v) * f)); }
+    return c1;
+  };
+  const dim = (pct) => st.effect === "rainbow" ? [150, 150, 150] : c1.map((v) => Math.round(v * pct / 100));
+  const smallText = (s, x, y, c) => { let cx = x; for (const ch of s) { const g = SIGN_FONTS.small[ch]; if (!g) continue;
+    g.forEach((row, r) => [...row].forEach((v, k) => { if (v === "#") put(cx + k, y + r, c); })); cx += g[0].length + 1; } };
+  const smallW = (s) => { let w = 0, n = 0; for (const ch of s) { const g = SIGN_FONTS.small[ch]; if (g) { w += g[0].length; n++; } } return w + Math.max(0, n - 1); };
+
+  let font = st.font;
+  const hasL = alerts && alerts.la, hasB = alerts && alerts.ba, alert = hasL || hasB;
+  if (font === "huge" && alert) font = "station";
+  const showDate = st.date && !alert && font !== "huge", bottomLine = showDate || alert;
+  const th = font === "huge" ? 28 : font === "segment" ? 16 : 14, gap = font === "huge" || font === "segment" ? 3 : 2;
+  const h = now.getHours(), m = now.getMinutes(), s = now.getSeconds();
+  const tstr = st.h24 ? `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}` : `${h % 12 || 12}:${String(m).padStart(2, "0")}`;
+  const ampm = !st.h24 && st.ampm ? (h < 12 ? "AM" : "PM") : null;
+  const colonOn = !st.blink || s % 2 === 0;
+
+  const seg = (x, y, w, hh, lit, draw) => { if (!draw) return; for (let yy = y; yy < y + hh; yy++) for (let xx = x; xx < x + w; xx++) { const c = at(xx, yy); put(xx, yy, lit ? c : c.map((v) => Math.floor(v / 10))); } };
+  const glyph = (rows, scale, x, y, draw) => { if (draw) rows.forEach((row, r) => [...row].forEach((v, k) => { if (v === "#") for (let sy = 0; sy < scale; sy++) for (let sx = 0; sx < scale; sx++) put(x + k * scale + sx, y + r * scale + sy, at(x + k * scale + sx, y + r * scale + sy)); })); return rows[0].length * scale; };
+  const text = (x, y, draw) => {
+    let cx = x;
+    [...tstr].forEach((ch, i) => {
+      const colon = ch === ":"; let w = 0;
+      if (font === "segment") {
+        if (colon) { w = 2; if (colonOn) { seg(cx, y + 4, 2, 2, true, draw); seg(cx, y + 10, 2, 2, true, draw); } }
+        else { const on = SEGS[+ch] ?? 0x40, Wd = 9, Hh = 16, T = 2, M = 8;
+          seg(cx + T, y, Wd - 2 * T, T, on & 1, draw); seg(cx + Wd - T, y + T, T, M - T - 1, on & 2, draw);
+          seg(cx + Wd - T, y + M + 1, T, M - T - 1, on & 4, draw); seg(cx + T, y + Hh - T, Wd - 2 * T, T, on & 8, draw);
+          seg(cx, y + M + 1, T, M - T - 1, on & 16, draw); seg(cx, y + T, T, M - T - 1, on & 32, draw);
+          seg(cx + T, y + M - 1, Wd - 2 * T, T, on & 64, draw); w = Wd; }
+      } else {
+        const set = font === "retro" ? SIGN_FONTS.retro : SIGN_FONTS.big, scale = font === "station" ? 1 : 2;
+        const rows = set[ch]; if (rows) w = glyph(rows, scale, cx, y, draw && !(colon && !colonOn));
+      }
+      cx += w + (i < tstr.length - 1 ? gap : 0);
+    });
+    return cx - x;
+  };
+  const tw = text(0, 0, false), aw = ampm ? 2 + smallW(ampm) : 0;
+  const x0 = Math.floor((W - (tw + aw)) / 2);
+  const y0 = bottomLine ? (alert ? 3 : font === "segment" ? 3 : 4) : Math.floor((H - th) / 2) - (st.secBar ? 1 : 0);
+  top = y0; bottom = y0 + th - 1;
+  text(x0, y0, true);
+  if (ampm) smallText(ampm, x0 + tw + 2, y0 + th - 5, at(x0 + tw, y0 + th - 1));
+  if (st.secBar) for (let x = 0; x < Math.floor((s + 1) * W / 60); x++) put(x, H - 1, dim(45));
+  if (showDate) { const d = `${CK_DAYS[now.getDay()]} ${CK_MONTHS[now.getMonth()]} ${now.getDate()}`; smallText(d, Math.floor((W - smallW(d)) / 2), 23, dim(65)); }
+  else if (alert) {
+    const showL = hasL && (!hasB || Math.floor(ms / 3000) % 2 === 0);
+    const label = showL ? alerts.la : alerts.ba, sev = showL ? alerts.ls : alerts.bs;
+    const color = sev >= 2 ? [255, 60, 40] : [255, 180, 50], bw = showL ? 9 : 15, bx = Math.floor((W - (bw + 4 + smallW(label))) / 2), by = 21;
+    for (let y = 0; y < 9; y++) for (let x = 0; x < bw; x++) {
+      const inside = showL ? ((x + .5 - 4.5) ** 2 + (y + .5 - 4.5) ** 2 <= 4.5 * 4.5 + 2.7) : !((x === 0 || x === bw - 1) && (y === 0 || y === 8));
+      if (inside) put(bx + x, by + y, showL ? [128, 129, 131] : [0, 55, 165]);
+    }
+    smallText(showL ? "L" : "B48", bx + (showL ? 3 : 2), by + 2, [255, 255, 255]);
+    smallText(label, bx + bw + 4, by + 2, color);
+  }
+  return img;
+}
+
+// ---- clock style settings ----
+const CK_SWATCHES = ["#ffe1aa", "#ffb432", "#ffffff", "#8cc8ff", "#78ff8c", "#ff6ec7", "#ff3c28"];
+let CK = null, ckTimer;
+function swatches(id, key) {
+  const el = $(id); el.innerHTML = "";
+  for (const c of CK_SWATCHES) {
+    const b = document.createElement("button"); b.className = "swatch" + (CK[key] === c ? " sel" : ""); b.style.background = c; b.title = c;
+    b.onclick = () => { CK[key] = c; renderClockCard(); saveClock({ [key]: c }); };
+    el.appendChild(b);
+  }
+  const custom = document.createElement("label"); custom.className = "swatch custom" + (CK_SWATCHES.includes(CK[key]) ? "" : " sel");
+  custom.innerHTML = `<input type="color" value="${CK[key]}">`; custom.title = "Custom color";
+  custom.querySelector("input").oninput = (e) => { CK[key] = e.target.value; drawClockPreview(); };
+  custom.querySelector("input").onchange = (e) => { CK[key] = e.target.value; renderClockCard(); saveClock({ [key]: e.target.value }); };
+  el.appendChild(custom);
+}
+function renderClockCard() {
+  if (!CK) return;
+  seg("ckFont", CK.font); seg("ckEffect", CK.effect);
+  swatches("ckColor", "color"); swatches("ckColor2", "color2");
+  $("ckColor2Wrap").classList.toggle("hidden", CK.effect !== "gradient");
+  document.querySelectorAll("[data-ck]").forEach((cb) => { cb.checked = Boolean(CK[cb.dataset.ck]); });
+  document.querySelector('[data-ck="ampm"]').closest("label").classList.toggle("hidden", CK.h24);
+  drawClockPreview();
+}
+function drawClockPreview() { if (CK && SIGN_FONTS) paintLed($("clockCv"), renderClockImage(CK, new Date(), null, performance.now())); }
+let ckPending = {}, ckLoaded = false;
+function saveClock(patch) {
+  ckPending = { ...ckPending, ...patch };            // several quick changes -> one save with all of them
+  clearTimeout(ckTimer);
+  ckTimer = setTimeout(async () => {
+    const send = ckPending; ckPending = {};
+    try { await api("settings", { clock: send }); toast("Clock style saved"); } catch (e) { if (e.message !== "locked") toast(e.message); }
+  }, 300);
+}
+$("ckFont").onclick = (e) => { const v = e.target.dataset.v; if (v) { CK.font = v; renderClockCard(); saveClock({ font: v }); } };
+$("ckEffect").onclick = (e) => { const v = e.target.dataset.v; if (v) { CK.effect = v; renderClockCard(); saveClock({ effect: v }); } };
+document.querySelectorAll("[data-ck]").forEach((cb) => { cb.onchange = () => { CK[cb.dataset.ck] = cb.checked; renderClockCard(); saveClock({ [cb.dataset.ck]: cb.checked }); }; });
+setInterval(() => { if (!document.hidden && CK) { drawClockPreview(); if (lastTransit && lastTransit.lay === "clock") drawHeroClock(); } }, 250);
 
 // ---- navigation: #home, #animations[/library|create|idle], #settings ----
 function route() {

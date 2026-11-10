@@ -33,7 +33,9 @@ test("brightness and idle settings round-trip and reach the sign", async () => {
   assert.deepStrictEqual(r.body.idle, { every: 60, style: "mix" });
 
   r = await call(sign);
-  assert.deepStrictEqual(r.body, { bd: 20, bn: 5, ns: 17, ne: 7, ie: 60, is: "mix", lv: 0 });
+  const { ck, ...rest } = r.body;
+  assert.deepStrictEqual(rest, { bd: 20, bn: 5, ns: 17, ne: 7, ie: 60, is: "mix", lv: 0 });
+  assert.strictEqual(ck.f, "station");
 });
 
 test("play + message commands get increasing ids the sign can pick up", async () => {
@@ -69,7 +71,9 @@ test("/sign falls back to defaults if the database is unavailable", async () => 
   setStore(broken);
   const r = await call(sign);
   assert.strictEqual(r.status, 200);
-  assert.deepStrictEqual(r.body, { bd: 12, bn: 5, ns: 17, ne: 7, ie: 30, is: "walk", lv: 0 });
+  const { ck, ...rest } = r.body;
+  assert.deepStrictEqual(rest, { bd: 12, bn: 5, ns: 17, ne: 7, ie: 30, is: "walk", lv: 0 });
+  assert.ok(ck);
   // ...and the app explains the problem instead of crashing
   const a = await call(app, { path: "/api/settings", headers: PIN });
   assert.strictEqual(a.status, 503);
@@ -141,4 +145,19 @@ test("clock block: /transit sends the clock layout plus an L delay indicator", a
   assert.strictEqual(r.body.ba, undefined);
   alerts.clearCache();
   await call(app, { method: "POST", path: "/api/schedule", headers: PIN, body: { reset: true } });
+});
+
+test("clock style: saved from the app, validated, and sent to the sign compactly", async () => {
+  setStore(settings.memoryStore());
+  let r = await call(app, { method: "POST", path: "/api/settings", headers: PIN,
+    body: { clock: { font: "segment", color: "#FF3C28", effect: "gradient", color2: "#ffffff", h24: true, secBar: 1 } } });
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.body.clock.font, "segment");
+  assert.strictEqual(r.body.clock.color, "#ff3c28");
+  r = await call(sign);
+  assert.deepStrictEqual(r.body.ck, { f: "segment", c: "ff3c28", c2: "ffffff", m: "gradient", h24: 1, ap: 0, d: 1, b: 1, sb: 1 });
+  r = await call(app, { method: "POST", path: "/api/settings", headers: PIN, body: { clock: { font: "comic sans" } } });
+  assert.strictEqual(r.status, 400);
+  r = await call(app, { method: "POST", path: "/api/settings", headers: PIN, body: { clock: { color: "red" } } });
+  assert.strictEqual(r.status, 400);
 });

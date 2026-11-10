@@ -28,11 +28,19 @@ test("device view only carries fresh commands", () => {
     anim: { seq: 3, name: "peek", at: now - 10_000 },
     msg: { seq: 7, text: "Hi", repeat: 2, at: now - 10 * 60_000 }, // 10 min old
   });
-  const v = s.deviceView(cfg, now);
+  const { ck, ...v } = s.deviceView(cfg, now);
   assert.deepStrictEqual(v, { bd: 12, bn: 5, ns: 17, ne: 7, ie: 30, is: "walk", lv: 0, a: { i: 3, n: "peek" } });
   assert.strictEqual(s.deviceView(cfg, now + 120_000).a, undefined);
 });
 
 test("night hours are validated as 0-23", () => {
   assert.deepStrictEqual(s.validatePatch({ brightness: { nightStart: 17, nightEnd: 30 } }), { brightness: { nightStart: 17, nightEnd: 23 } });
+});
+
+test("web app fonts (signfonts.json) match the firmware's fonts.h", () => {
+  const { execFileSync } = require("node:child_process");
+  const path = require("node:path");
+  const script = path.join(__dirname, "../../tools/fonts2json.js");
+  if (!require("node:fs").existsSync(script)) return;   // deployed bundle has no tools/
+  execFileSync(process.execPath, [script, "--check"]);
 });
