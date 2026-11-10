@@ -316,6 +316,7 @@ static void fetchSign() {
     s.clock.date = (ck["d"] | 1) == 1;
     s.clock.blink = (ck["b"] | 1) == 1;
     s.clock.secBar = (ck["sb"] | 0) == 1;
+    s.clock.withRoute = (ck["wr"] | 1) == 1;
   }
   if (doc["a"].is<JsonObject>()) {
     s.animId = doc["a"]["i"] | 0;

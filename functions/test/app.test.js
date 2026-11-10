@@ -155,7 +155,7 @@ test("clock style: saved from the app, validated, and sent to the sign compactly
   assert.strictEqual(r.body.clock.font, "segment");
   assert.strictEqual(r.body.clock.color, "#ff3c28");
   r = await call(sign);
-  assert.deepStrictEqual(r.body.ck, { f: "segment", c: "ff3c28", c2: "ffffff", m: "gradient", h24: 1, ap: 0, d: 1, b: 1, sb: 1 });
+  assert.deepStrictEqual(r.body.ck, { f: "segment", c: "ff3c28", c2: "ffffff", m: "gradient", h24: 1, ap: 0, d: 1, b: 1, sb: 1, wr: 1 });
   r = await call(app, { method: "POST", path: "/api/settings", headers: PIN, body: { clock: { font: "comic sans" } } });
   assert.strictEqual(r.status, 400);
   r = await call(app, { method: "POST", path: "/api/settings", headers: PIN, body: { clock: { color: "red" } } });

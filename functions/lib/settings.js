@@ -17,7 +17,8 @@ const DEFAULTS = Object.freeze({
   idle: { every: 30, style: "walk" },  // seconds between idle cats; 0 = off
   // Clock look (used by "clock" schedule blocks)
   clock: { font: "station", color: "#ffe1aa", color2: "#ff7d0f", effect: "solid",
-           h24: false, ampm: false, date: true, blink: true, secBar: false },
+           h24: false, ampm: false, date: true, blink: true, secBar: false,
+           withRoute: true },   // when only one route is shown, the clock goes below it
   anim: null,                          // {seq, name, at}
   msg: null,                           // {seq, text, repeat, at}
   device: null,                        // {lastSeen}
@@ -101,7 +102,7 @@ function validatePatch(body = {}) {
         out[k] = String(c[k]).toLowerCase();
       }
     }
-    for (const k of ["h24", "ampm", "date", "blink", "secBar"]) if (c[k] !== undefined) out[k] = Boolean(c[k]);
+    for (const k of ["h24", "ampm", "date", "blink", "secBar", "withRoute"]) if (c[k] !== undefined) out[k] = Boolean(c[k]);
     patch.clock = out;
   }
   return patch;
@@ -120,7 +121,7 @@ function deviceView(cfg, nowMs = Date.now()) {
     ck: {
       f: cfg.clock.font, c: cfg.clock.color.slice(1), c2: cfg.clock.color2.slice(1), m: cfg.clock.effect,
       h24: cfg.clock.h24 ? 1 : 0, ap: cfg.clock.ampm ? 1 : 0, d: cfg.clock.date ? 1 : 0,
-      b: cfg.clock.blink ? 1 : 0, sb: cfg.clock.secBar ? 1 : 0,
+      b: cfg.clock.blink ? 1 : 0, sb: cfg.clock.secBar ? 1 : 0, wr: cfg.clock.withRoute ? 1 : 0,
     },  // animation library version (fits 32 bits); the sign re-downloads /anims when it changes
   };
   if (cfg.anim && nowMs - cfg.anim.at < ANIM_FRESH_MS) out.a = { i: cfg.anim.seq, n: cfg.anim.name };

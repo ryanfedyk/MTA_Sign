@@ -48,6 +48,8 @@
   .led.big .second { color: #e6a028; font-size: 20px; margin-left: 2px; }
   .legend { margin-top: 10px; font-size: 12px; color: var(--muted); display: flex; gap: 14px; }
   .legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+  .heroclock { border-top: 1px solid #2a2622; margin-top: 4px; padding-top: 10px; color: #ffe1aa; font-size: 30px; font-weight: 700; display: flex; justify-content: space-between; align-items: center; }
+  .heroclock span { font-size: 14px; color: #a49a8c; font-weight: 500; }
   .led.clockmode { padding: 0; min-height: 0; overflow: hidden; }
   .clockface { text-align: center; font-size: 46px; font-weight: 700; color: #ffe1aa; letter-spacing: .02em; line-height: 1; }
   .clockdate { text-align: center; color: #b4b4b4; font-size: 15px; margin-top: 8px; display: flex; justify-content: center; gap: 10px; }
@@ -126,6 +128,28 @@
   .route .seg button { font-size: 13px; padding: 7px 2px; }
   .nowline { font-size: 14px; margin-bottom: 12px; }
   .modeseg { margin-bottom: 8px; }
+  .period { border: 1px solid var(--line); border-radius: 14px; margin-bottom: 8px; background: var(--card); overflow: hidden; }
+  .period.open { border-color: #cfc7bb; box-shadow: 0 4px 14px rgba(40,30,20,.06); }
+  .psum { width: 100%; display: flex; align-items: center; gap: 12px; background: none; border: 0; padding: 12px; text-align: left; font: inherit; color: var(--text); cursor: pointer; }
+  .pico { width: 30px; height: 30px; flex: none; display: grid; place-items: center; font-size: 15px; }
+  .pico.clock { background: var(--screen); border-radius: 8px; font-size: 16px; }
+  .pico.pair { position: relative; }
+  .pico.pair .badge { position: absolute; width: 20px; height: 20px; font-size: 11px; }
+  .pico.pair .badge.l { left: 0; top: 0; } .pico.pair .badge.b { right: 0; bottom: 0; border: 2px solid var(--card); }
+  .pico.none { background: var(--card2); border-radius: 8px; color: var(--muted); }
+  .ptext { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .ptext b { font-size: 15px; font-weight: 650; }
+  .ptext span { font-size: 13px; color: var(--muted); }
+  .chev { color: var(--muted); font-size: 22px; transition: transform .2s; }
+  .period.open .chev { transform: rotate(90deg); }
+  .pedit { padding: 0 12px 14px; border-top: 1px solid var(--line); }
+  .showopts { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  .showopts button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 2px; border: 1px solid var(--line); background: var(--card2); border-radius: 12px; font: inherit; font-size: 12px; color: var(--text); cursor: pointer; }
+  .showopts button .ic { font-size: 15px; font-weight: 700; height: 20px; }
+  .showopts button.sel { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  .dirs .route { margin-top: 10px; }
+  .watch { margin-top: 10px; }
+  .watch .when { margin-left: 0; font-size: 14px; color: var(--text); padding: 4px 0; }
   .when { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); margin: 6px 0 2px 32px; }
   .when input { width: 16px; height: 16px; accent-color: var(--accent); }
   .clockhint { margin: 8px 0 0; }
@@ -424,6 +448,7 @@
           <label><span>Date</span><span class="switch"><input type="checkbox" data-ck="date"><i></i></span></label>
           <label><span>Blinking colon</span><span class="switch"><input type="checkbox" data-ck="blink"><i></i></span></label>
           <label><span>Seconds bar</span><span class="switch"><input type="checkbox" data-ck="secBar"><i></i></span></label>
+          <label><span>Show clock when only one route is on</span><span class="switch"><input type="checkbox" data-ck="withRoute"><i></i></span></label>
         </div>
       </section>
 
@@ -431,9 +456,9 @@
         <h2>Schedule</h2>
         <p class="sub">Showing now: <b id="schedNow" class="amber">…</b></p>
         <div id="blocks"></div>
-        <p class="hint" style="margin-bottom:10px">Blocks are checked top to bottom — the first match wins. Outside every block the sign shows the L to Manhattan. One route on = it fills the screen; both off = blank sign (animations still play).</p>
+        <p class="hint" style="margin-bottom:10px">If periods overlap, the higher one wins. Any time not covered shows the L to Manhattan.</p>
         <div class="row2">
-          <button class="btn small ghost" id="addBlock">+ Add block</button>
+          <button class="btn small ghost" id="addBlock">+ Add time period</button>
           <button class="btn small ghost" id="resetSched">Reset to original</button>
         </div>
         <button class="btn" id="saveSched">Save schedule</button>
@@ -655,12 +680,26 @@ async function refreshPreview() {
     if (d.lay === "off") {
       led.className = "led";
       led.innerHTML = '<div class="row none">Blank (nothing scheduled) — the cat still visits</div>';
+    } else if (d.lay === "B" && (!CK || CK.withRoute !== false)) {
+      const t = (v) => (v === 0 ? "AR" : v), n = new Date();
+      led.className = "led big";
+      led.innerHTML = `<div class="row"><div class="badge b" style="border-radius:12px;font-size:17px">B48</div><div>
+        <div class="dname">${d.b.dir === "NB" ? "Northbound" : "Southbound"}</div>
+        <div class="times">${d.b.t1 < 0 ? '<span class="none">– –</span>' : `<span class="${d.b.live1 ? "live" : "sched"}" style="font-size:26px">${t(d.b.t1)}${d.b.t2 >= 0 ? ", " + t(d.b.t2) : ""}m</span>`}</div></div></div>
+        <div class="heroclock">${n.getHours() % 12 || 12}:${String(n.getMinutes()).padStart(2, "0")}<span>${n.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).replace(",", "")}</span></div>`;
     } else if (d.lay === "B") {
       const t = (v) => (v === 0 ? "AR" : v);
       led.className = "led big";
       led.innerHTML = `<div class="row"><div class="badge b" style="border-radius:12px;font-size:17px">B48</div><div>
         <div class="dname">${d.b.dir === "NB" ? "Northbound" : "Southbound"}</div>
         <div class="times">${d.b.t1 < 0 ? '<span class="none">– –</span>' : `<span class="${d.b.live1 ? "live" : "sched"}">${t(d.b.t1)}</span>${d.b.t2 >= 0 ? `<small class="second ${d.b.live2 ? "" : "sched"}">, ${t(d.b.t2)}${d.b.t2 > 0 ? "m" : ""}</small>` : (d.b.t1 > 0 ? '<small class="unit">m</small>' : "")}`}</div></div></div>`;
+    } else if (d.lay === "L" && (!CK || CK.withRoute !== false)) {
+      const t = (v) => (v === 0 ? "AR" : v), n = new Date();
+      led.className = "led big";
+      led.innerHTML = `<div class="row"><div class="badge l">L</div><div>
+        <div class="dname">${d.l.dir === "BK" ? "Brooklyn" : "Manhattan"}</div>
+        <div class="times">${d.l.t1 < 0 ? '<span class="none">– –</span>' : `<span class="live" style="font-size:26px">${t(d.l.t1)}${d.l.t2 >= 0 ? ", " + t(d.l.t2) : ""}m</span>`}</div></div></div>
+        <div class="heroclock">${n.getHours() % 12 || 12}:${String(n.getMinutes()).padStart(2, "0")}<span>${n.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).replace(",", "")}</span></div>`;
     } else if (d.lay === "L") {
       const names = { MN: "Manhattan", BK: "Brooklyn" };
       const t = (v) => (v === 0 ? "AR" : v);
@@ -1050,54 +1089,95 @@ const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];   // Monday first
 const toTime = (m) => m >= 1440 ? "23:59" : String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
 const fromTime = (v, isEnd) => { if (!v) return 0; const [h, m] = v.split(":").map(Number); const t = h * 60 + m; return isEnd && t === 1439 ? 1440 : t; };
 
+// The editor works on a simpler model and converts to/from the saved rules.
+const DAYSETS = { weekdays: [1, 2, 3, 4, 5], weekends: [0, 6], every: [0, 1, 2, 3, 4, 5, 6] };
+const sameDays = (a, b) => a.length === b.length && a.every((d) => b.includes(d));
+function daysKind(days) { for (const [k, v] of Object.entries(DAYSETS)) if (sameDays(days, v)) return k; return "custom"; }
+function toSimple(b) {
+  const Lalways = b.L !== "off" && b.Lwhen !== "issues", Balways = b.B48 !== "off" && b.Bwhen !== "issues";
+  const show = b.mode === "clock" ? "clock" : Lalways && Balways ? "both" : Lalways ? "L" : Balways ? "B" : "none";
+  const watchL = b.L !== "off" && (show === "clock" || (show !== "L" && show !== "both")), watchB = b.B48 !== "off" && (show === "clock" || (show !== "B" && show !== "both"));
+  // Remember each route's direction while it's switched off (editor-only fields; the server ignores them).
+  return { show, watchL, watchB, Ldir: b.L === "off" ? (b._Ldir || "MN") : b.L, Bdir: b.B48 === "off" ? (b._Bdir || "SB") : b.B48 };
+}
+function fromSimple(b, m) {
+  const L = m.show === "L" || m.show === "both" || m.watchL, B = m.show === "B" || m.show === "both" || m.watchB;
+  b._Ldir = m.Ldir; b._Bdir = m.Bdir;
+  b.mode = m.show === "clock" ? "clock" : "arrivals";
+  b.L = L ? m.Ldir : "off"; b.B48 = B ? m.Bdir : "off";
+  b.Lwhen = m.show === "L" || m.show === "both" ? "always" : "issues";
+  b.Bwhen = m.show === "B" || m.show === "both" ? "always" : "issues";
+}
+const fmtT = (m) => { const h = Math.floor(m / 60) % 24, mm = m % 60, ap = h < 12 ? "AM" : "PM"; return `${h % 12 || 12}${mm ? ":" + String(mm).padStart(2, "0") : ""} ${ap}`; };
+function summary(b) {
+  const m = toSimple(b);
+  const dk = daysKind(b.days);
+  const days = dk === "weekdays" ? "Weekdays" : dk === "weekends" ? "Weekends" : dk === "every" ? "Every day" : DAY_ORDER.filter((d) => b.days.includes(d)).map((d) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d]).join(", ");
+  const time = b.from === 0 && b.to >= 1439 ? "All day" : `${fmtT(b.from)} – ${b.to >= 1439 ? "midnight" : fmtT(b.to)}`;
+  const Ln = m.Ldir === "BK" ? "L to Brooklyn" : "L to Manhattan", Bn = `B48 ${m.Bdir === "NB" ? "northbound" : "southbound"}`;
+  const what = { clock: "Clock", L: Ln, B: Bn, both: `${Ln} + ${Bn}`, none: "Nothing" }[m.show];
+  const watch = [m.watchL && (m.show === "clock" ? "L" : Ln), m.watchB && (m.show === "clock" ? "B48" : Bn)].filter(Boolean);
+  const extra = !watch.length ? "" : m.show === "clock" ? ` · watching ${watch.join(" + ")}` : ` · ${watch.join(" + ")} if there's a problem`;
+  return { days, time, what: what + extra, show: m.show };
+}
+
+let openBlock = -1;
+const SHOW_OPTS = [["clock", "Clock", "🕐"], ["L", "L train", "L"], ["B", "B48 bus", "B"], ["both", "Both", "L+B"], ["none", "Nothing", "—"]];
 function renderBlocks() {
   const wrap = $("blocks"); wrap.innerHTML = "";
   BLOCKS.forEach((b, i) => {
-    const el = document.createElement("div"); el.className = "blk";
-    el.innerHTML = `
-      <div class="top"><span class="num">Block ${i + 1}</span>
-        <span class="tools"><button data-a="up" aria-label="Move up">↑</button><button data-a="down" aria-label="Move down">↓</button><button data-a="del" aria-label="Delete">✕</button></span></div>
-      <div class="days">${DAY_ORDER.map((d) => `<button data-d="${d}" class="${b.days.includes(d) ? "on" : ""}">${DAY_NAMES[d]}</button>`).join("")}</div>
-      <div class="times2"><span>From</span><input type="time" data-t="from" value="${toTime(b.from)}"><span>to</span><input type="time" data-t="to" value="${toTime(b.to)}"></div>
-      <div class="seg modeseg" data-m="1"><button data-mode="arrivals">Arrivals</button><button data-mode="clock">Clock</button></div>
-      <div class="route"><div class="badge l">L</div><div class="seg" data-r="L">
-        <button data-v="MN">Manhattan</button><button data-v="BK">Brooklyn</button><button data-v="off">Off</button></div></div>
-      <label class="when" data-w="Lwhen"><input type="checkbox"> Only when there's a problem</label>
-      <div class="route"><div class="badge b">B</div><div class="seg" data-r="B48">
-        <button data-v="NB">Northbound</button><button data-v="SB">Southbound</button><button data-v="off">Off</button></div></div>
-      <label class="when" data-w="Bwhen"><input type="checkbox"> Only when there's a problem</label>
-      <p class="hint clockhint">Shows the time and date. Routes that are on are watched: if one has delays or service changes, it appears under the clock.</p>`;
-    const mode = b.mode || "arrivals";
-    el.querySelectorAll(".seg[data-r]").forEach((sg) => sg.querySelectorAll("button").forEach((bt) => bt.classList.toggle("sel", b[sg.dataset.r] === bt.dataset.v)));
-    el.querySelectorAll(".modeseg button").forEach((bt) => bt.classList.toggle("sel", bt.dataset.mode === mode));
-    el.querySelectorAll(".when").forEach((w) => {
-      const routeOff = b[w.dataset.w === "Lwhen" ? "L" : "B48"] === "off";
-      w.classList.toggle("hidden", mode === "clock" || routeOff);
-      w.querySelector("input").checked = b[w.dataset.w] === "issues";
-      w.querySelector("input").onchange = (ev) => { b[w.dataset.w] = ev.target.checked ? "issues" : "always"; markDirty(); };
-    });
-    el.querySelector(".clockhint").classList.toggle("hidden", mode !== "clock");
-    el.onclick = (e) => {
-      const t = e.target;
-      if (t.dataset.d !== undefined) {
-        const d = Number(t.dataset.d);
-        b.days = b.days.includes(d) ? b.days.filter((x) => x !== d) : [...b.days, d];
-      } else if (t.dataset.mode) {
-        b.mode = t.dataset.mode;
-      } else if (t.dataset.v && t.parentElement.dataset.r) {
-        b[t.parentElement.dataset.r] = t.dataset.v;
-      } else if (t.dataset.a === "del") {
-        BLOCKS.splice(i, 1);
-      } else if (t.dataset.a === "up" && i > 0) {
-        [BLOCKS[i - 1], BLOCKS[i]] = [BLOCKS[i], BLOCKS[i - 1]];
-      } else if (t.dataset.a === "down" && i < BLOCKS.length - 1) {
-        [BLOCKS[i + 1], BLOCKS[i]] = [BLOCKS[i], BLOCKS[i + 1]];
-      } else return;
-      markDirty(); renderBlocks();
-    };
-    el.querySelectorAll("input[type=time]").forEach((inp) => {
-      inp.onchange = () => { b[inp.dataset.t] = fromTime(inp.value, inp.dataset.t === "to"); markDirty(); };
-    });
+    const sm = summary(b), m = toSimple(b), el = document.createElement("div");
+    el.className = "period" + (openBlock === i ? " open" : "");
+    const icon = sm.show === "clock" ? '<span class="pico clock">🕐</span>' : sm.show === "L" ? '<span class="badge l pico">L</span>'
+      : sm.show === "B" ? '<span class="badge b pico">B</span>'
+      : sm.show === "both" ? '<span class="pico pair"><span class="badge l">L</span><span class="badge b">B</span></span>' : '<span class="pico none">—</span>';
+    el.innerHTML = `<button class="psum">${icon}<span class="ptext"><b>${sm.days} · ${sm.time}</b><span>${sm.what}</span></span><span class="chev">›</span></button>`;
+    el.querySelector(".psum").onclick = () => { openBlock = openBlock === i ? -1 : i; renderBlocks(); };
+    if (openBlock === i) {
+      const dk = daysKind(b.days);
+      const ed = document.createElement("div"); ed.className = "pedit";
+      ed.innerHTML = `
+        <div class="lbl">When</div>
+        <div class="seg wrap" data-k="days"><button data-v="weekdays">Weekdays</button><button data-v="weekends">Weekends</button><button data-v="every">Every day</button><button data-v="custom">Custom</button></div>
+        <div class="days ${dk === "custom" ? "" : "hidden"}" style="margin-top:8px">${DAY_ORDER.map((d) => `<button data-d="${d}" class="${b.days.includes(d) ? "on" : ""}">${DAY_NAMES[d]}</button>`).join("")}</div>
+        <div class="times2" style="margin-top:8px"><span>From</span><input type="time" data-t="from" value="${toTime(b.from)}"><span>to</span><input type="time" data-t="to" value="${toTime(b.to)}"></div>
+        <div class="lbl">Show</div>
+        <div class="showopts">${SHOW_OPTS.map(([v, label, ic]) => `<button data-show="${v}" class="${m.show === v ? "sel" : ""}"><span class="ic">${ic}</span>${label}</button>`).join("")}</div>
+        <div class="dirs"></div>
+        <div class="watch"></div>
+        <div class="row2" style="margin-top:14px">
+          <button class="btn small ghost" data-a="up">↑ Earlier</button><button class="btn small ghost" data-a="down">↓ Later</button><button class="btn small ghost" data-a="del">Delete</button>
+        </div>`;
+      ed.querySelectorAll('[data-k="days"] button').forEach((x) => x.classList.toggle("sel", x.dataset.v === dk));
+      // Direction pickers for every route that is shown or watched
+      const dirs = ed.querySelector(".dirs");
+      const needL = m.show === "L" || m.show === "both" || (m.watchL && m.show !== "clock");
+      const needB = m.show === "B" || m.show === "both" || (m.watchB && m.show !== "clock");
+      if (needL) dirs.insertAdjacentHTML("beforeend", `<div class="route"><div class="badge l">L</div><div class="seg" data-dir="L"><button data-v="MN" class="${m.Ldir === "MN" ? "sel" : ""}">To Manhattan</button><button data-v="BK" class="${m.Ldir === "BK" ? "sel" : ""}">To Brooklyn</button></div></div>`);
+      if (needB) dirs.insertAdjacentHTML("beforeend", `<div class="route"><div class="badge b">B</div><div class="seg" data-dir="B"><button data-v="NB" class="${m.Bdir === "NB" ? "sel" : ""}">Northbound</button><button data-v="SB" class="${m.Bdir === "SB" ? "sel" : ""}">Southbound</button></div></div>`);
+      // Watch options for routes that aren't shown
+      const watch = ed.querySelector(".watch");
+      const opt = (key, text, on) => `<label class="when"><input type="checkbox" data-w="${key}" ${on ? "checked" : ""}> ${text}</label>`;
+      if (m.show === "clock") watch.innerHTML = '<div class="lbl">Show a problem indicator for</div>' + opt("watchL", "L train", m.watchL) + opt("watchB", "B48 bus", m.watchB);
+      else if (m.show === "L") watch.innerHTML = opt("watchB", "Also show the B48 if it has a problem", m.watchB);
+      else if (m.show === "B") watch.innerHTML = opt("watchL", "Also show the L if it has a problem", m.watchL);
+      else if (m.show === "none") watch.innerHTML = '<div class="lbl">Show anyway if there\'s a problem</div>' + opt("watchL", "L train", m.watchL) + opt("watchB", "B48 bus", m.watchB);
+      el.appendChild(ed);
+
+      const update = (fn) => { const mm = toSimple(b); fn(mm); fromSimple(b, mm); markDirty(); renderBlocks(); };
+      ed.onclick = (e) => {
+        const t = e.target.closest("button"); if (!t) return;
+        if (t.parentElement.dataset.k === "days") { if (t.dataset.v !== "custom") b.days = [...DAYSETS[t.dataset.v]]; else if (dk !== "custom") b.days = b.days.slice(); markDirty(); if (t.dataset.v === "custom") { renderBlocks(); ed.querySelector(".days")?.classList.remove("hidden"); return; } renderBlocks(); return; }
+        if (t.dataset.d !== undefined) { const d = Number(t.dataset.d); b.days = b.days.includes(d) ? b.days.filter((x) => x !== d) : [...b.days, d]; markDirty(); renderBlocks(); return; }
+        if (t.dataset.show) return update((mm) => { mm.show = t.dataset.show; if (mm.show === "both") { mm.watchL = mm.watchB = false; } });
+        if (t.parentElement.dataset.dir) return update((mm) => { mm[t.parentElement.dataset.dir === "L" ? "Ldir" : "Bdir"] = t.dataset.v; });
+        if (t.dataset.a === "del") { BLOCKS.splice(i, 1); openBlock = -1; markDirty(); renderBlocks(); return; }
+        if (t.dataset.a === "up" && i > 0) { [BLOCKS[i - 1], BLOCKS[i]] = [BLOCKS[i], BLOCKS[i - 1]]; openBlock = i - 1; markDirty(); renderBlocks(); }
+        if (t.dataset.a === "down" && i < BLOCKS.length - 1) { [BLOCKS[i + 1], BLOCKS[i]] = [BLOCKS[i], BLOCKS[i + 1]]; openBlock = i + 1; markDirty(); renderBlocks(); }
+      };
+      ed.querySelectorAll("input[data-w]").forEach((cb) => { cb.onchange = () => update((mm) => { mm[cb.dataset.w] = cb.checked; }); });
+      ed.querySelectorAll("input[type=time]").forEach((inp) => { inp.onchange = () => { b[inp.dataset.t] = fromTime(inp.value, inp.dataset.t === "to"); markDirty(); renderBlocks(); }; });
+    }
     wrap.appendChild(el);
   });
 }
@@ -1110,7 +1190,7 @@ async function loadSchedule() {
   schedDirty = false; $("saveSched").textContent = "Save schedule";
   renderBlocks();
 }
-$("addBlock").onclick = () => { BLOCKS.push({ days: [1, 2, 3, 4, 5], from: 8 * 60, to: 10 * 60, mode: "arrivals", L: "MN", B48: "off", Lwhen: "always", Bwhen: "always" }); markDirty(); renderBlocks(); };
+$("addBlock").onclick = () => { BLOCKS.push({ days: [1, 2, 3, 4, 5], from: 8 * 60, to: 10 * 60, mode: "arrivals", L: "MN", B48: "off", Lwhen: "always", Bwhen: "always" }); openBlock = BLOCKS.length - 1; markDirty(); renderBlocks(); };
 $("resetSched").onclick = async () => {
   if (!confirm("Go back to the original schedule?")) return;
   try { const d = await api("schedule", { reset: true }); BLOCKS = d.blocks; $("schedNow").textContent = d.now; $("homeNow").textContent = d.now; schedDirty = false; $("saveSched").textContent = "Save schedule"; renderBlocks(); toast("Original schedule restored"); }

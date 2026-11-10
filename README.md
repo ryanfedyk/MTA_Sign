@@ -20,26 +20,30 @@ MTA feeds ──► Firebase cloud functions ──► ESP32-S3 LED matrix
 
 ## Schedule (editable in the app)
 
-The **Schedule** card in the control panel lists time blocks. Each block has days, a
-start and end time, and a setting for each route: the L (Manhattan, Brooklyn, or off)
-and the B48 (northbound, southbound, or off). Blocks are checked top to bottom, and the
-first match wins. Outside every block, the sign shows the L to Manhattan.
+The **Schedule** card in Settings lists time periods as one-line summaries, for
+example "Weekdays · 6 AM – 10 AM · L to Manhattan · B48 southbound if there's a
+problem". Tap a period to edit it:
 
-The screen layout follows the routes that are on:
+- **When:** Weekdays, Weekends, Every day, or Custom days, plus a time range.
+- **Show:** Clock, L train, B48 bus, Both, or Nothing, plus the direction of each route.
+- **Also watch:** for routes that aren't shown, appear or add an indicator only when
+  they have delays, a suspension, or service changes.
 
-| Routes on | Layout |
-| --- | --- |
-| Both | Two rows |
-| One | That route fills the screen |
-| None | Blank sign (idle animations still play) |
-
-Each block can also show a **Clock** instead of arrivals: the time and date. Routes
-that are on in a clock block are *watched*. If one has delays, a suspension, or
-service changes, its bullet and the problem appear under the clock (amber, or red for
-a suspension). In arrivals blocks, a route can be set to **only show when there's a
-problem**. Arrival screens also flash the problem in place of the direction label.
+If periods overlap, the higher one wins. Any time not covered shows the L to Manhattan.
 Problems come from the MTA's GTFS-realtime service-alert feeds. If the MTA ever
 requires a key, add it as the `MTA_API_KEY` secret.
+
+**Screens:**
+
+| What's shown | Screen |
+| --- | --- |
+| Two routes | Two rows |
+| One route | The route on top and the clock below, in your clock style |
+| Clock | The time and date, with problem indicators for watched routes |
+| Nothing | Blank (idle animations still play) |
+
+To show a single route full screen without the clock, turn off **Show clock when only
+one route is on** under Clock style.
 
 **Clock style** (Settings) controls how the clock looks. The app preview uses the
 sign's exact pixel fonts.

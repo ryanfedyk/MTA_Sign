@@ -104,6 +104,18 @@ int main(int argc, char** argv) {
     st.font = CLOCK_HUGE; setClockStyle(st); drawTransit(p, c, 0, &ck); p.dump(f); frames++;
     setClockStyle(ClockStyle());
   }
+  else if (scene == "route-clock") {      // one route + clock, in a few styles
+    ClockTime ck; ck.valid = true; ck.hour = 15; ck.minute = 42; ck.second = 0; ck.wday = 2; ck.mon = 10; ck.mday = 10;
+    TransitData one = we; one.l1 = 4; one.l2 = 11;
+    ClockStyle st; setClockStyle(st); drawTransit(p, one, 0, &ck); p.dump(f); frames++;
+    TransitData bu = wk; bu.layout = LAYOUT_BUS; bu.b1 = 7; bu.b2 = 22; bu.bLive1 = true; bu.bLive2 = false;
+    drawTransit(p, bu, 0, &ck); p.dump(f); frames++;
+    st.font = CLOCK_SEGMENT; st.r = 255; st.g = 60; st.b = 40; setClockStyle(st);
+    one.l1 = 12; one.l2 = 18; drawTransit(p, one, 0, &ck); p.dump(f); frames++;
+    st = ClockStyle(); st.font = CLOCK_RETRO; st.mode = CLOCK_RAINBOW; ck.hour = 10; ck.minute = 8; setClockStyle(st);
+    strcpy(one.lAlert, "Delays"); one.lSev = 1; drawTransit(p, one, 0, &ck); p.dump(f); frames++;
+    setClockStyle(ClockStyle());
+  }
   else if (scene == "bus-cases") {        // B48 full screen: live/scheduled mixes
     TransitData bu = wk; bu.layout = LAYOUT_BUS;
     int cases[][4] = {{7, 22, 1, 0}, {12, 31, 1, 1}, {0, 9, 1, 0}, {-1, -1, 1, 1}};

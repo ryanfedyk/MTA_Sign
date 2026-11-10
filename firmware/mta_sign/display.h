@@ -62,6 +62,7 @@ struct ClockStyle {
   uint8_t r2 = 255, g2 = 125, b2 = 15;        // second color for gradients
   ClockColorMode mode = CLOCK_SOLID;
   bool h24 = false, ampm = false, date = true, blink = true, secBar = false;
+  bool withRoute = true;   // when only one route is shown, add the clock below it
 };
 void setClockStyle(const ClockStyle& style);
 

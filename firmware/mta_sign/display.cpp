@@ -502,8 +502,8 @@ static void segRect(Adafruit_GFX* g, const ClockPaint& p, int x, int y, int w, i
       g->drawPixel(xx, yy, c);
     }
 }
-static int drawSegDigit(Adafruit_GFX* g, const ClockPaint& p, int d, int x, int y) {
-  const int W = 9, H = 16, T = 2, M = H / 2;
+static int drawSegDigit(Adafruit_GFX* g, const ClockPaint& p, int d, int x, int y, int H = 16) {
+  const int W = 9, T = 2, M = H / 2;
   uint8_t on = (d >= 0 && d <= 9) ? SEGMENTS[d] : 0x40;   // '-' = middle segment only
   segRect(g, p, x + T, y, W - 2 * T, T, on & 0x01);                 // a
   segRect(g, p, x + W - T, y + T, T, M - T - 1, on & 0x02);         // b
@@ -532,14 +532,14 @@ static int drawScaledGlyph(Adafruit_GFX* g, const ClockPaint& p, const char* con
 
 // Draws (or measures, with g = null) the time string in a clock typeface.
 // `colonOn` false leaves the colon's space empty (blinking).
-static int drawClockText(Adafruit_GFX* g, const ClockPaint& p, ClockFont f, const char* s, int x, int y, bool colonOn) {
+static int drawClockText(Adafruit_GFX* g, const ClockPaint& p, ClockFont f, const char* s, int x, int y, bool colonOn, int segH = 16) {
   int cx = x;
   for (const char* q = s; *q; q++) {
     const bool colon = *q == ':';
     int w = 0;
     if (f == CLOCK_SEGMENT) {
-      if (colon) { w = 2; if (g && colonOn) { segRect(g, p, cx, y + 4, 2, 2, true); segRect(g, p, cx, y + 10, 2, 2, true); } }
-      else w = drawSegDigit(g, p, *q == '-' ? -1 : *q - '0', cx, y);
+      if (colon) { w = 2; if (g && colonOn) { segRect(g, p, cx, y + segH / 4, 2, 2, true); segRect(g, p, cx, y + segH - segH / 4 - 2, 2, 2, true); } }
+      else w = drawSegDigit(g, p, *q == '-' ? -1 : *q - '0', cx, y, segH);
     } else if (f == CLOCK_RETRO) {
       const char* const* rows = findGlyph(RETRO_FONT, *q);
       if (rows) w = drawScaledGlyph(colon && !colonOn ? nullptr : g, p, rows, RETRO_H, 2, cx, y);
@@ -609,11 +609,88 @@ static void drawClock(Adafruit_GFX& g, const TransitData& t, uint32_t ms, const 
   customText(&g, FACE_SMALL, label, bx + badgeW + 4, by + 2, c);
 }
 
+// ---------------------------------------------------------------------------
+// One route + clock:
+//    (L) Manhattan            compact bullet, direction (or the problem)
+//        4, 11m               next arrivals
+//   ─────────────────
+//   10:42        Tue          clock in your clock style, date on the right
+//                Nov 10
+// ---------------------------------------------------------------------------
+static void drawRouteClock(Adafruit_GFX& g, const TransitData& t, uint32_t ms, const ClockTime* now, bool bus) {
+  const int BX = 2, BY = 1, BD = 15, TX = 21;        // badge rows 1..15
+
+  // Badge
+  if (bus) {
+    g.fillRoundRect(BX - 1, BY, BD + 2, BD, 3, C_B_BLUE);
+    customText(&g, FACE_SMALL, "B48", BX + 2, BY + 5, C_WHITE);
+  } else {
+    fillDisc(g, BX, BY, BD, C_L_GREY);
+    blit(g, BULLET_L_SMALL, BULLET_L_SMALL_H, BX + 5, BY + 3, C_WHITE);
+  }
+
+  // Direction (alternates with the problem, if any)
+  const char* alert = bus ? t.bAlert : t.lAlert;
+  const uint8_t sev = bus ? t.bSev : t.lSev;
+  const char* dir = bus ? (!strcmp(t.bLabel, "NB") ? "Northbound" : "Southbound") : (directionName(t.lLabel) ? directionName(t.lLabel) : t.lLabel);
+  if (alert[0] && showAlertNow(ms)) customText(&g, FACE_SMALL, alert, TX, BY + 1, alertColor(sev));
+  else customText(&g, FACE_SMALL, dir, TX, BY + 1, C_LABEL_SOFT);
+
+  // Times: medium bold "4, 11m" on the badge's baseline
+  const int t1 = bus ? t.b1 : t.l1, t2 = bus ? t.b2 : t.l2;
+  const uint16_t c1 = bus ? (t.bLive1 ? C_AMBER : C_WHITE) : C_AMBER;
+  const uint16_t c2 = bus ? (t.bLive2 ? C_AMBER_2ND : rgb565(220, 220, 220)) : C_AMBER_2ND;
+  const int ty = BY + BD - MED_H;                   // rows 8..15, on the badge's bottom edge
+  if (t1 < 0) customText(&g, FACE_MED, "--", TX, ty, C_DIM);
+  else {
+    char a[12], b[12];
+    if (t1 == 0) snprintf(a, sizeof a, "AR"); else snprintf(a, sizeof a, "%d", t1);
+    int x = TX + customText(&g, FACE_MED, a, TX, ty, c1);
+    if (t2 >= 0) {
+      static const char* const COMMA[3] = {"#", "#", "#"};
+      blit(g, COMMA, 3, x + 2, ty + 6, c2);
+      x += 5;
+      if (t2 == 0) snprintf(b, sizeof b, "AR"); else snprintf(b, sizeof b, "%d", t2);
+      x += customText(&g, FACE_MED, b, x, ty, c2);
+    }
+    if ((t2 >= 0 ? t2 : t1) > 0) customText(&g, FACE_MED, "m", x + 1, ty, t2 >= 0 ? c2 : c1);
+  }
+
+  g.drawFastHLine(2, 17, 60, C_RULE);
+
+  // Clock (rows 18..31) in the chosen style; Huge isn't possible here.
+  const ClockStyle& st = gClock;
+  ClockFont f = st.font == CLOCK_HUGE ? CLOCK_STATION : st.font;
+  char tbuf[8];
+  if (!now || !now->valid) snprintf(tbuf, sizeof tbuf, "--:--");
+  else if (st.h24) snprintf(tbuf, sizeof tbuf, "%02d:%02d", now->hour, now->minute);
+  else { int h12 = now->hour % 12; if (!h12) h12 = 12; snprintf(tbuf, sizeof tbuf, "%d:%02d", h12, now->minute); }
+  const int cy = 18, ch = 14;
+  ClockPaint paint{st, ms, cy, cy + ch - 1};
+  const bool colonOn = !st.blink || !now || !now->valid || now->second % 2 == 0;
+  const int cw = drawClockText(&g, paint, f, tbuf, 2, cy, colonOn, 14);
+
+  // Date on the right, if there's room
+  if (st.date && now && now->valid) {
+    char md[8];
+    snprintf(md, sizeof md, "%s %d", MONTHS[now->mon % 12], now->mday);
+    const char* day = DAYS[now->wday % 7];
+    const int w = textWidth(FACE_SMALL, md) > textWidth(FACE_SMALL, day) ? textWidth(FACE_SMALL, md) : textWidth(FACE_SMALL, day);
+    if (2 + cw + 4 + w <= SCREEN_W - 1) {
+      const int rx = SCREEN_W - 2;
+      customText(&g, FACE_SMALL, day, rx - textWidth(FACE_SMALL, day), cy + 1, paint.dim(65));
+      customText(&g, FACE_SMALL, md, rx - textWidth(FACE_SMALL, md), cy + 8, paint.dim(65));
+    }
+  } else if (!st.h24 && st.ampm && now && now->valid) {
+    customText(&g, FACE_SMALL, now->hour < 12 ? "AM" : "PM", 2 + cw + 2, cy + ch - 5, paint.at(2 + cw, cy + ch - 1));
+  }
+}
+
 void drawTransit(Adafruit_GFX& g, const TransitData& t, uint32_t ms, const ClockTime* now) {
   g.fillScreen(C_BLACK);
   switch (t.layout) {
-    case LAYOUT_L:     drawLOnly(g, t, ms); break;
-    case LAYOUT_BUS:   drawBusOnly(g, t, ms); break;
+    case LAYOUT_L:     if (gClock.withRoute) drawRouteClock(g, t, ms, now, false); else drawLOnly(g, t, ms); break;
+    case LAYOUT_BUS:   if (gClock.withRoute) drawRouteClock(g, t, ms, now, true); else drawBusOnly(g, t, ms); break;
     case LAYOUT_CLOCK: drawClock(g, t, ms, now); break;
     case LAYOUT_OFF:   break;                       // blank sign (idle animations still play)
     default:           drawTwoRow(g, t, ms); break;

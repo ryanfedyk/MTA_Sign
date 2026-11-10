@@ -142,3 +142,9 @@ static const RetroGlyph RETRO_FONT[] = {
   {':', {".", "#", ".", ".", ".", "#", "."}},
   {'-', {".....", ".....", ".....", "#####", ".....", ".....", "....."}},
 };
+
+// Small bold L for the compact route bullet (route + clock layout).
+static const int BULLET_L_SMALL_H = 9;
+static const char* const BULLET_L_SMALL[BULLET_L_SMALL_H] = {
+  "##....", "##....", "##....", "##....", "##....", "##....", "##....", "######", "######",
+};
