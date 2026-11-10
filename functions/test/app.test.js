@@ -116,3 +116,29 @@ test("schedule: app saves blocks, /transit follows them, reset restores the orig
   r = await call(transit, { query: { at: "2026-11-04T09:00:00-05:00" } });
   assert.strictEqual(r.body.lay, "LB");
 });
+
+test("clock block: /transit sends the clock layout plus an L delay indicator", async () => {
+  const store = settings.memoryStore();
+  setStore(store);
+  const alerts = require("../lib/alerts");
+  alerts.clearCache();
+  const { transit } = require("../index.js");
+  const { fakeFeeds } = require("./helpers");
+  const base = fakeFeeds(Date.now());
+  global.fetch = async (url, opts) => {
+    if (String(url).includes("subway-alerts")) return { ok: true, json: async () => ({ entity: [{ id: "1", alert: {
+      informed_entity: [{ route_id: "L" }], header_text: { translation: [{ text: "L trains are delayed" }] },
+      "transit_realtime.mercury_alert": { alert_type: "Delays" } } }] }) };
+    if (String(url).includes("bus-alerts")) return { ok: true, json: async () => ({ entity: [] }) };
+    return base(url, opts);
+  };
+  await call(app, { method: "POST", path: "/api/schedule", headers: PIN,
+    body: { blocks: [{ days: [0, 1, 2, 3, 4, 5, 6], from: 0, to: 1440, mode: "clock", L: "MN", B48: "off" }] } });
+  const r = await call(transit, { query: { at: "2026-11-04T13:00:00-05:00" } });
+  assert.strictEqual(r.body.lay, "clock");
+  assert.strictEqual(r.body.la, "Delays");
+  assert.strictEqual(r.body.ls, 1);
+  assert.strictEqual(r.body.ba, undefined);
+  alerts.clearCache();
+  await call(app, { method: "POST", path: "/api/schedule", headers: PIN, body: { reset: true } });
+});

@@ -193,7 +193,12 @@ static void fetchTransit() {
   TransitData t;
   t.valid = true;
   const char* lay = doc["lay"] | "LB";
-  t.layout = !strcmp(lay, "L") ? LAYOUT_L : !strcmp(lay, "B") ? LAYOUT_BUS : !strcmp(lay, "off") ? LAYOUT_OFF : LAYOUT_TWO;
+  t.layout = !strcmp(lay, "L") ? LAYOUT_L : !strcmp(lay, "B") ? LAYOUT_BUS : !strcmp(lay, "off") ? LAYOUT_OFF
+           : !strcmp(lay, "clock") ? LAYOUT_CLOCK : LAYOUT_TWO;
+  copyStr(t.lAlert, sizeof t.lAlert, doc["la"] | "");
+  copyStr(t.bAlert, sizeof t.bAlert, doc["ba"] | "");
+  t.lSev = doc["ls"] | 0;
+  t.bSev = doc["bs"] | 0;
   copyStr(t.lLabel, sizeof t.lLabel, doc["l"]["dir"] | "MN");
   t.l1 = doc["l"]["t1"] | -1;
   t.l2 = doc["l"]["t2"] | -1;
@@ -528,6 +533,14 @@ void loop() {
 
   if (now - lastBrightness > 1000) { lastBrightness = now; updateBrightness(s); }
 
+  static ClockTime clockNow;
+  struct tm ti;
+  if (getLocalTime(&ti, 0)) {
+    clockNow.valid = true;
+    clockNow.hour = ti.tm_hour; clockNow.minute = ti.tm_min; clockNow.second = ti.tm_sec;
+    clockNow.wday = ti.tm_wday; clockNow.mon = ti.tm_mon; clockNow.mday = ti.tm_mday;
+  }
+
   // New commands from the web app
   if (s.msgId && s.msgId != seenMsgId) {
     seenMsgId = s.msgId;
@@ -567,12 +580,12 @@ void loop() {
       connectingDetail(detail, sizeof detail);
       drawConnecting(*dma_display, now, detail);
     } else {
-      drawTransit(*dma_display, t);
+      drawTransit(*dma_display, t, now, &clockNow);
       if (mode == MODE_ANIM) {
         bool running = currentCloud ? drawCloudAnim(*dma_display, *currentCloud, now - modeStart)
                                     : drawAnim(*dma_display, currentAnim, now - modeStart);
         if (!running) {
-          if (currentCloud && currentCloud->blackBg) drawTransit(*dma_display, t);   // don't flash black
+          if (currentCloud && currentCloud->blackBg) drawTransit(*dma_display, t, now, &clockNow);   // don't flash black
           mode = MODE_TRANSIT;
           currentCloud = nullptr;
           scheduleIdle(s, now);

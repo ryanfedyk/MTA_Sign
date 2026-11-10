@@ -14,6 +14,7 @@
 //   SIGN_APP_PIN  passphrase for the control panel
 //   GEMINI_API_KEY  Google AI Studio key for generating animations (optional)
 //   GEMINI_MODEL    override the Gemini model (optional, default gemini-3.8-flash)
+//   MTA_API_KEY     sent as x-api-key to the MTA service-alert feeds, if they require one (optional)
 
 const fs = require("fs");
 const path = require("path");
@@ -23,6 +24,7 @@ const { onRequest } = require("firebase-functions/v2/https");
 const schedule = require("./lib/schedule");
 const { planFor } = schedule;
 const { buildArrivals } = require("./lib/transit");
+const { currentAlerts } = require("./lib/alerts");
 const settings = require("./lib/settings");
 const animations = require("./lib/animations");
 
@@ -55,7 +57,10 @@ exports.transit = onRequest(HTTP_OPTS, async (req, res) => {
     const now = req.query.at ? new Date(String(req.query.at)) : new Date();
     if (Number.isNaN(now.getTime())) return res.status(400).json({ error: "bad ?at= time" });
 
-    const plan = planFor(now, { busDir: req.query.dir }, await scheduleBlocks());
+    const blocks = await scheduleBlocks();
+    const alerts = await currentAlerts();
+    const plan = planFor(now, { busDir: req.query.dir }, blocks, alerts);
+    plan.alerts = alerts;
     const body = await buildArrivals(plan, { busKey, debug: req.query.debug === "1" });
     res.json(body);
   } catch (err) {

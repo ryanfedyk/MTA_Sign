@@ -124,8 +124,17 @@ async function buildArrivals(plan, { busKey, now = new Date(), debug = false } =
       t2: a[1] ? a[1].min : -1, live2: a[1] ? a[1].live : true,
     },
   };
+  // Service problems for the routes this block watches (shown as indicators).
+  const al = plan.alerts || {};
+  for (const [key, short] of [["L", "l"], ["B48", "b"]]) {
+    const a = al[key];
+    if (plan.watch && plan.watch[key] && a && a.level > 0) {
+      response[short + "a"] = a.label;     // "Delays" | "Changes" | "Planned" | "Suspended"
+      response[short + "s"] = a.level;     // 1 amber, 2 red
+    }
+  }
   if (debug) {
-    response.debug = { plan, obaArrivalsCount: bus.obaCount, totalMerged: a.length, allMergedArrivals: a };
+    response.debug = { plan: { ...plan, alerts: undefined }, alerts: al, obaArrivalsCount: bus.obaCount, totalMerged: a.length, allMergedArrivals: a };
   }
   return response;
 }

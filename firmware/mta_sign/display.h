@@ -21,6 +21,14 @@ enum Layout : uint8_t {
   LAYOUT_L,         // "L":  L train full screen
   LAYOUT_BUS,       // "B":  B48 full screen
   LAYOUT_OFF,       // "off": nothing scheduled -- blank
+  LAYOUT_CLOCK,     // "clock": time + date, with service-problem indicators
+};
+
+// Local time for the clock screen (filled from NTP in the sketch).
+struct ClockTime {
+  bool valid = false;
+  int hour = 0, minute = 0, second = 0;
+  int wday = 0, mon = 0, mday = 1;     // 0 = Sunday / January
 };
 
 // Latest arrivals from the cloud function (/transit).
@@ -32,6 +40,10 @@ struct TransitData {
   char bLabel[6] = "SB";
   int b1 = -1, b2 = -1;
   bool bLive1 = true, bLive2 = true;
+  // Service problems on watched routes ("" = none). sev: 1 amber, 2 red.
+  char lAlert[12] = "";
+  char bAlert[12] = "";
+  uint8_t lSev = 0, bSev = 0;
 };
 
 // Animations (all cat themed). Names match the cloud function / web app.
@@ -41,7 +53,8 @@ AnimKind animFromName(const char* name);   // "walk", "chase", "peek" (unknown -
 // Screens
 // `detail` is a short status line, e.g. "WIFI", "LOADING", "ERR -1".
 void drawConnecting(Adafruit_GFX& g, uint32_t ms, const char* detail = nullptr, const char* title = "CONNECTING");
-void drawTransit(Adafruit_GFX& g, const TransitData& t);
+// `ms` drives blinking/alternating indicators; `now` is needed for the clock.
+void drawTransit(Adafruit_GFX& g, const TransitData& t, uint32_t ms = 0, const ClockTime* now = nullptr);
 
 // Draws one frame of an animation `elapsedMs` after it started, on top of
 // whatever is already on screen. Returns false once the animation is over.

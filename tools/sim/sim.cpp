@@ -72,6 +72,16 @@ int main(int argc, char** argv) {
   if (scene == "weekday") { drawTransit(p, wk); p.dump(f); frames = 1; }
   else if (scene == "weekend") { drawTransit(p, we); p.dump(f); frames = 1; }
   else if (scene == "weekend-ar") { we.l1 = 0; we.l2 = 7; drawTransit(p, we); p.dump(f); frames = 1; }
+  else if (scene == "clock-cases") {      // clock: plain, L delays, L suspended, both, two-row + full-screen indicators
+    ClockTime ck; ck.valid = true; ck.hour = 14; ck.minute = 7; ck.second = 0; ck.wday = 2; ck.mon = 10; ck.mday = 10;
+    TransitData c = wk; c.layout = LAYOUT_CLOCK;
+    drawTransit(p, c, 0, &ck); p.dump(f); frames++;
+    strcpy(c.lAlert, "Delays"); c.lSev = 1; ck.hour = 9; ck.minute = 41; drawTransit(p, c, 0, &ck); p.dump(f); frames++;
+    strcpy(c.lAlert, "Suspended"); c.lSev = 2; ck.hour = 23; ck.minute = 59; drawTransit(p, c, 0, &ck); p.dump(f); frames++;
+    strcpy(c.bAlert, "Changes"); c.bSev = 1; drawTransit(p, c, 3500, &ck); p.dump(f); frames++;
+    TransitData two = wk; strcpy(two.lAlert, "Delays"); two.lSev = 1; drawTransit(p, two, 0, &ck); p.dump(f); frames++;
+    TransitData one = we; strcpy(one.lAlert, "Delays"); one.lSev = 1; drawTransit(p, one, 0, &ck); p.dump(f); frames++;
+  }
   else if (scene == "bus-cases") {        // B48 full screen: live/scheduled mixes
     TransitData bu = wk; bu.layout = LAYOUT_BUS;
     int cases[][4] = {{7, 22, 1, 0}, {12, 31, 1, 1}, {0, 9, 1, 0}, {-1, -1, 1, 1}};

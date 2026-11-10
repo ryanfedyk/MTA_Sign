@@ -1,6 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert");
-const { planFor, B48_STOP_NB, B48_STOP_SB } = require("../lib/schedule");
+const { planFor: planFull, B48_STOP_NB, B48_STOP_SB } = require("../lib/schedule");
+// Most tests only care about what's shown, not which routes are watched for alerts.
+const planFor = (...a) => { const { watch, ...rest } = planFull(...a); return rest; };
 
 // All times written with an explicit New York offset.
 const at = (iso) => new Date(iso);
@@ -75,9 +77,27 @@ test("outside every block: L to Manhattan only", () => {
 
 test("validateBlocks cleans input and rejects nonsense", () => {
   assert.deepStrictEqual(validateBlocks([{ days: [5, "1", 1, 9], from: "60", to: 120, L: "MN", B48: "off" }]),
-    [{ days: [1, 5], from: 60, to: 120, L: "MN", B48: "off" }]);
+    [{ days: [1, 5], from: 60, to: 120, mode: "arrivals", L: "MN", B48: "off", Lwhen: "always", Bwhen: "always" }]);
   assert.throws(() => validateBlocks([{ days: [], from: 0, to: 60, L: "MN", B48: "off" }]), /no days/);
   assert.throws(() => validateBlocks([{ days: [1], from: 60, to: 60, L: "MN", B48: "off" }]), /same time/);
   assert.throws(() => validateBlocks([{ days: [1], from: 0, to: 60, L: "Q", B48: "off" }]), /L must/);
   assert.strictEqual(validateBlocks(DEFAULT_BLOCKS).length, 5);
+});
+
+test("clock blocks watch their routes; 'issues' routes appear only when there's a problem", () => {
+  const blocks = [
+    { days: [1, 2, 3, 4, 5], from: 6 * 60, to: 10 * 60, mode: "arrivals", L: "MN", B48: "SB", Lwhen: "always", Bwhen: "issues" },
+    { days: [1, 2, 3, 4, 5], from: 10 * 60, to: 24 * 60, mode: "clock", L: "MN", B48: "off" },
+  ];
+  const morning = at("2026-11-04T08:00:00-05:00"), noon = at("2026-11-04T12:00:00-05:00");
+  // bus hidden while it runs fine, shown when it has a problem
+  assert.strictEqual(planFull(morning, {}, blocks, {}).layout, "L");
+  const withBusIssue = planFull(morning, {}, blocks, { B48: { level: 1 } });
+  assert.strictEqual(withBusIssue.layout, "LB");
+  assert.deepStrictEqual(withBusIssue.watch, { L: true, B48: true });
+  // clock for the rest of the day, watching the L
+  const c = planFull(noon, {}, blocks, {});
+  assert.strictEqual(c.layout, "clock");
+  assert.deepStrictEqual(c.watch, { L: true, B48: false });
+  assert.strictEqual(describePlan(c), "Clock (watching L)");
 });

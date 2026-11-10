@@ -27,6 +27,16 @@ jobs:
           echo "== /transit (arrivals the sign shows)"
           curl -sS -w "\n   HTTP %{http_code}\n" "$BASE/transit"
           echo
+          echo "== Service alerts the cloud sees right now (MTA feed)"
+          curl -sS "$BASE/transit?debug=1" | node -e '
+            const d = JSON.parse(require("fs").readFileSync(0, "utf8")).debug || {};
+            const a = d.alerts || {};
+            console.log("   feed reachable:", a.ok);
+            for (const r of ["L", "B48"]) console.log(`   ${r}:`, a[r] ? `${a[r].label || "good service"} ${a[r].headline ? "— " + a[r].headline : ""}` : "?");'
+          echo
+          echo "== Raw MTA alert feed reachability (from GitHub)"
+          curl -sS -o /dev/null -w "   subway-alerts.json HTTP %{http_code}, %{size_download} bytes\n" "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/camsys%2Fsubway-alerts.json"
+          echo
           echo "== /sign (settings + commands the sign polls every 5 s)"
           curl -sS -w "\n   HTTP %{http_code}\n" "$BASE/sign"
           echo

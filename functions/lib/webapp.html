@@ -48,6 +48,11 @@
   .led.big .second { color: #e6a028; font-size: 20px; margin-left: 2px; }
   .legend { margin-top: 10px; font-size: 12px; color: var(--muted); display: flex; gap: 14px; }
   .legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+  .clockface { text-align: center; font-size: 46px; font-weight: 700; color: #ffe1aa; letter-spacing: .02em; line-height: 1; }
+  .clockdate { text-align: center; color: #b4b4b4; font-size: 15px; margin-top: 8px; display: flex; justify-content: center; gap: 10px; }
+  .alertchip { display: inline-flex; align-items: center; gap: 6px; color: var(--amber); font-weight: 600; font-size: 14px; }
+  .alertchip.red { color: #ff5a3c; }
+  #alertline { display: flex; gap: 12px; margin-top: 8px; }
   .legend .a::before { background: var(--amber); } .legend .w::before { background: #fff; }
 
   /* inputs */
@@ -119,6 +124,10 @@
   .route .seg { flex: 1; }
   .route .seg button { font-size: 13px; padding: 7px 2px; }
   .nowline { font-size: 14px; margin-bottom: 12px; }
+  .modeseg { margin-bottom: 8px; }
+  .when { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); margin: 6px 0 2px 32px; }
+  .when input { width: 16px; height: 16px; accent-color: var(--accent); }
+  .clockhint { margin: 8px 0 0; }
   .nowline b { font-weight: 650; }
 
   /* toggle */
@@ -253,6 +262,7 @@
     <div class="page" data-page="home">
       <section class="hero">
         <div class="led" id="led"><div class="row none">Loading…</div></div>
+        <div id="alertline"></div>
         <div class="legend"><span class="a">Live GPS</span><span class="w">Scheduled</span><span class="schednow">Schedule: <b id="homeNow">…</b></span></div>
       </section>
 
@@ -595,6 +605,15 @@ async function refreshPreview() {
   try {
     const d = await (await fetch(TRANSIT_URL)).json();
     const led = $("led");
+    const alertHtml = [["L", d.la, d.ls, "l"], ["B48", d.ba, d.bs, "b"]].filter((x) => x[1])
+      .map(([r, label, sev, cls]) => `<span class="alertchip ${sev >= 2 ? "red" : ""}"><span class="badge ${cls}" style="width:18px;height:18px;font-size:11px">${r === "L" ? "L" : "B"}</span>${label}</span>`).join("");
+    $("alertline").innerHTML = d.lay === "clock" ? "" : alertHtml;
+    if (d.lay === "clock") {
+      const n = new Date(), h = n.getHours() % 12 || 12, m = String(n.getMinutes()).padStart(2, "0");
+      led.className = "led";
+      led.innerHTML = `<div class="clockface">${h}:${m}</div><div class="clockdate">${alertHtml || n.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).replace(",", "")}</div>`;
+      return;
+    }
     if (d.lay === "off") {
       led.className = "led";
       led.innerHTML = '<div class="row none">Blank (nothing scheduled) — the cat still visits</div>';
@@ -1002,16 +1021,31 @@ function renderBlocks() {
         <span class="tools"><button data-a="up" aria-label="Move up">↑</button><button data-a="down" aria-label="Move down">↓</button><button data-a="del" aria-label="Delete">✕</button></span></div>
       <div class="days">${DAY_ORDER.map((d) => `<button data-d="${d}" class="${b.days.includes(d) ? "on" : ""}">${DAY_NAMES[d]}</button>`).join("")}</div>
       <div class="times2"><span>From</span><input type="time" data-t="from" value="${toTime(b.from)}"><span>to</span><input type="time" data-t="to" value="${toTime(b.to)}"></div>
+      <div class="seg modeseg" data-m="1"><button data-mode="arrivals">Arrivals</button><button data-mode="clock">Clock</button></div>
       <div class="route"><div class="badge l">L</div><div class="seg" data-r="L">
         <button data-v="MN">Manhattan</button><button data-v="BK">Brooklyn</button><button data-v="off">Off</button></div></div>
+      <label class="when" data-w="Lwhen"><input type="checkbox"> Only when there's a problem</label>
       <div class="route"><div class="badge b">B</div><div class="seg" data-r="B48">
-        <button data-v="NB">Northbound</button><button data-v="SB">Southbound</button><button data-v="off">Off</button></div></div>`;
-    el.querySelectorAll(".seg").forEach((sg) => sg.querySelectorAll("button").forEach((bt) => bt.classList.toggle("sel", b[sg.dataset.r] === bt.dataset.v)));
+        <button data-v="NB">Northbound</button><button data-v="SB">Southbound</button><button data-v="off">Off</button></div></div>
+      <label class="when" data-w="Bwhen"><input type="checkbox"> Only when there's a problem</label>
+      <p class="hint clockhint">Shows the time and date. Routes that are on are watched: if one has delays or service changes, it appears under the clock.</p>`;
+    const mode = b.mode || "arrivals";
+    el.querySelectorAll(".seg[data-r]").forEach((sg) => sg.querySelectorAll("button").forEach((bt) => bt.classList.toggle("sel", b[sg.dataset.r] === bt.dataset.v)));
+    el.querySelectorAll(".modeseg button").forEach((bt) => bt.classList.toggle("sel", bt.dataset.mode === mode));
+    el.querySelectorAll(".when").forEach((w) => {
+      const routeOff = b[w.dataset.w === "Lwhen" ? "L" : "B48"] === "off";
+      w.classList.toggle("hidden", mode === "clock" || routeOff);
+      w.querySelector("input").checked = b[w.dataset.w] === "issues";
+      w.querySelector("input").onchange = (ev) => { b[w.dataset.w] = ev.target.checked ? "issues" : "always"; markDirty(); };
+    });
+    el.querySelector(".clockhint").classList.toggle("hidden", mode !== "clock");
     el.onclick = (e) => {
       const t = e.target;
       if (t.dataset.d !== undefined) {
         const d = Number(t.dataset.d);
         b.days = b.days.includes(d) ? b.days.filter((x) => x !== d) : [...b.days, d];
+      } else if (t.dataset.mode) {
+        b.mode = t.dataset.mode;
       } else if (t.dataset.v && t.parentElement.dataset.r) {
         b[t.parentElement.dataset.r] = t.dataset.v;
       } else if (t.dataset.a === "del") {
@@ -1038,7 +1072,7 @@ async function loadSchedule() {
   schedDirty = false; $("saveSched").textContent = "Save schedule";
   renderBlocks();
 }
-$("addBlock").onclick = () => { BLOCKS.push({ days: [1, 2, 3, 4, 5], from: 8 * 60, to: 10 * 60, L: "MN", B48: "off" }); markDirty(); renderBlocks(); };
+$("addBlock").onclick = () => { BLOCKS.push({ days: [1, 2, 3, 4, 5], from: 8 * 60, to: 10 * 60, mode: "arrivals", L: "MN", B48: "off", Lwhen: "always", Bwhen: "always" }); markDirty(); renderBlocks(); };
 $("resetSched").onclick = async () => {
   if (!confirm("Go back to the original schedule?")) return;
   try { const d = await api("schedule", { reset: true }); BLOCKS = d.blocks; $("schedNow").textContent = d.now; $("homeNow").textContent = d.now; schedDirty = false; $("saveSched").textContent = "Save schedule"; renderBlocks(); toast("Original schedule restored"); }

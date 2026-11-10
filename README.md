@@ -33,6 +33,14 @@ The screen layout follows the routes that are on:
 | One | That route fills the screen |
 | None | Blank sign (idle animations still play) |
 
+Each block can also show a **Clock** instead of arrivals: the time and date. Routes
+that are on in a clock block are *watched*. If one has delays, a suspension, or
+service changes, its bullet and the problem appear under the clock (amber, or red for
+a suspension). In arrivals blocks, a route can be set to **only show when there's a
+problem**. Arrival screens also flash the problem in place of the direction label.
+Problems come from the MTA's GTFS-realtime service-alert feeds. If the MTA ever
+requires a key, add it as the `MTA_API_KEY` secret.
+
 **Reset to original** restores the rules below.
 
 ## What the sign shows

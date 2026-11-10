@@ -1,7 +1,12 @@
 // What the sign shows when -- an editable list of time blocks (New York time).
 //
 // Each block: { days: [0..6] (0 = Sunday), from: minutes, to: minutes,
-//               L: "MN" | "BK" | "off",  B48: "NB" | "SB" | "off" }
+//               mode: "arrivals" | "clock",
+//               L: "MN" | "BK" | "off",  B48: "NB" | "SB" | "off",
+//               Lwhen / Bwhen: "always" | "issues"  (arrivals only: show the
+//                 route only while it has delays / service changes) }
+// In a clock block, routes that are on are *watched*: the clock shows an
+// indicator if they have a service problem.
 // Blocks are checked top to bottom; the first one that matches wins.
 // A block whose "to" is earlier than its "from" wraps past midnight.
 // Outside every block the sign shows the L to Manhattan only.
@@ -15,6 +20,8 @@ const B48_STOP_NB = "303825"; // Lorimer St / Grand St (Northbound, school dismi
 
 const WEEKDAYS = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
 const L_CHOICES = ["MN", "BK", "off"];
+const MODES = ["arrivals", "clock"];
+const WHEN = ["always", "issues"];
 const B_CHOICES = ["NB", "SB", "off"];
 const MAX_BLOCKS = 24;
 
@@ -26,7 +33,7 @@ const DEFAULT_BLOCKS = [
   { days: [1, 2, 3, 4, 5], from: 19 * 60, to: 24 * 60, L: "MN", B48: "SB" },
   { days: [0, 6], from: 0, to: 24 * 60, L: "MN", B48: "off" },
 ];
-const FALLBACK = { L: "MN", B48: "off" };
+const FALLBACK = { mode: "arrivals", L: "MN", B48: "off", Lwhen: "always", Bwhen: "always" };
 
 function localTime(date) {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -59,7 +66,10 @@ function validateBlocks(blocks) {
     if (from === to) throw new Error(`block ${i + 1} starts and ends at the same time`);
     if (!L_CHOICES.includes(b.L)) throw new Error(`block ${i + 1}: L must be MN, BK or off`);
     if (!B_CHOICES.includes(b.B48)) throw new Error(`block ${i + 1}: B48 must be NB, SB or off`);
-    return { days, from, to, L: b.L, B48: b.B48 };
+    const mode = MODES.includes(b.mode) ? b.mode : "arrivals";
+    const Lwhen = WHEN.includes(b.Lwhen) ? b.Lwhen : "always";
+    const Bwhen = WHEN.includes(b.Bwhen) ? b.Bwhen : "always";
+    return { days, from, to, mode, L: b.L, B48: b.B48, Lwhen, Bwhen };
   });
 }
 
@@ -67,26 +77,40 @@ function validateBlocks(blocks) {
  * @param {Date} date
  * @param {{busDir?: "NB"|"SB"}} [overrides]  ?dir= query param for testing
  * @param {Array} [blocks]  the saved schedule (defaults to the original rules)
- * @returns {{layout: "LB"|"L"|"B"|"off", weekend: boolean,
+ * @param {{L?: {level:number}, B48?: {level:number}}} [alerts]  current service problems
+ * @returns {{layout: "LB"|"L"|"B"|"off"|"clock", weekend: boolean,
  *            l: null | {track: "N"|"S", label: string},
- *            b: null | {stop: string, label: string}}}
+ *            b: null | {stop: string, label: string},
+ *            watch: {L: boolean, B48: boolean}}}   routes whose problems should be shown
  */
-function planFor(date, overrides = {}, blocks = DEFAULT_BLOCKS) {
+function planFor(date, overrides = {}, blocks = DEFAULT_BLOCKS, alerts = {}) {
   const { day, hour, minute } = localTime(date);
   const m = hour * 60 + minute;
-  const block = (blocks && blocks.length ? blocks : DEFAULT_BLOCKS).find((b) => inBlock(b, day, m)) || FALLBACK;
+  const block = { ...FALLBACK, ...((blocks && blocks.length ? blocks : DEFAULT_BLOCKS).find((b) => inBlock(b, day, m)) || {}) };
+  const weekend = day === 0 || day === 6;
+  const hasIssue = (k) => Boolean(alerts && alerts[k] && alerts[k].level > 0);
 
-  const l = block.L === "off" ? null : block.L === "BK" ? { track: "S", label: "BK" } : { track: "N", label: "MN" };
-  let b = block.B48 === "off" ? null : block.B48 === "NB" ? { stop: B48_STOP_NB, label: "NB" } : { stop: B48_STOP_SB, label: "SB" };
+  if (block.mode === "clock" && !overrides.busDir) {
+    return { layout: "clock", weekend, l: null, b: null, watch: { L: block.L !== "off", B48: block.B48 !== "off" } };
+  }
+
+  const lOn = block.L !== "off" && (block.Lwhen !== "issues" || hasIssue("L"));
+  const bOn = block.B48 !== "off" && (block.Bwhen !== "issues" || hasIssue("B48"));
+  const l = !lOn ? null : block.L === "BK" ? { track: "S", label: "BK" } : { track: "N", label: "MN" };
+  let b = !bOn ? null : block.B48 === "NB" ? { stop: B48_STOP_NB, label: "NB" } : { stop: B48_STOP_SB, label: "SB" };
   if (overrides.busDir === "NB") b = { stop: B48_STOP_NB, label: "NB" };
   if (overrides.busDir === "SB") b = { stop: B48_STOP_SB, label: "SB" };
 
   const layout = l && b ? "LB" : l ? "L" : b ? "B" : "off";
-  return { layout, weekend: day === 0 || day === 6, l, b };
+  return { layout, weekend, l, b, watch: { L: Boolean(l), B48: Boolean(b) } };
 }
 
 /** Plain-English description for the app ("L to Manhattan + B48 northbound"). */
 function describePlan(p) {
+  if (p.layout === "clock") {
+    const w = [p.watch.L && "L", p.watch.B48 && "B48"].filter(Boolean);
+    return "Clock" + (w.length ? ` (watching ${w.join(" + ")})` : "");
+  }
   const parts = [];
   if (p.l) parts.push(`L to ${p.l.label === "BK" ? "Brooklyn" : "Manhattan"}`);
   if (p.b) parts.push(`B48 ${p.b.label === "NB" ? "northbound" : "southbound"}`);

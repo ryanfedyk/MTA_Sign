@@ -270,21 +270,6 @@ static void drawDualTimes(Adafruit_GFX& g, int yPos, int t1, int t2, bool live1,
   }
 }
 
-static void drawTwoRow(Adafruit_GFX& g, const TransitData& t) {
-  // Top row: L train
-  g.fillRoundRect(2, 2, 11, 11, 3, C_L_GREY);
-  printAt(g, 5, 4, 1, C_WHITE, "L");
-  printAt(g, 16, 4, 1, C_LABEL, t.lLabel);
-  drawDualTimes(g, 4, t.l1, t.l2, true, true);
-
-  g.drawFastHLine(2, 15, 60, C_RULE);
-
-  // Bottom row: B48 bus
-  g.fillRoundRect(2, 18, 11, 11, 3, C_B_BLUE);
-  printAt(g, 5, 20, 1, C_WHITE, "B");
-  printAt(g, 16, 20, 1, C_LABEL, t.bLabel);
-  drawDualTimes(g, 20, t.b1, t.b2, t.bLive1, t.bLive2);
-}
 
 // ---------------------------------------------------------------------------
 // Custom type + shapes (see fonts.h)
@@ -345,11 +330,42 @@ static void fillDisc(Adafruit_GFX& g, int x0, int y0, int d, uint16_t color) {
 // ---------------------------------------------------------------------------
 static const uint16_t C_LABEL_SOFT = rgb565(200, 200, 205);
 static const uint16_t C_AMBER_2ND  = rgb565(235, 160, 40);   // a touch softer than the next train
+static const uint16_t C_ALERT_RED  = rgb565(255, 60, 40);
+
+static uint16_t alertColor(uint8_t sev) { return sev >= 2 ? C_ALERT_RED : C_AMBER; }
+// Alternate a label with its alert every 2 s (alert shown 1.2 s of each 2 s).
+static bool showAlertNow(uint32_t ms) { return (ms % 2000) < 1200; }
+
+// Small warning triangle (7x7) for the two-row layout.
+static const char* const WARN[7] = {
+  "...#...", "..###..", "..#.#..", ".##.##.", ".#####.", "###.###", "#######",
+};
 
 static const char* directionName(const char* label) {
   if (!strcmp(label, "MN")) return "Manhattan";
   if (!strcmp(label, "BK")) return "Brooklyn";
   return nullptr;
+}
+
+// Weekday two-row layout (L on top, B48 below); a warning triangle replaces
+// the direction label every other second when a route has a problem.
+static void drawTwoRow(Adafruit_GFX& g, const TransitData& t, uint32_t ms) {
+  const bool lWarn = t.lAlert[0] && showAlertNow(ms), bWarn = t.bAlert[0] && showAlertNow(ms);
+  // Top row: L train
+  g.fillRoundRect(2, 2, 11, 11, 3, C_L_GREY);
+  printAt(g, 5, 4, 1, C_WHITE, "L");
+  if (lWarn) blit(g, WARN, 7, 17, 4, alertColor(t.lSev));
+  else printAt(g, 16, 4, 1, C_LABEL, t.lLabel);
+  drawDualTimes(g, 4, t.l1, t.l2, true, true);
+
+  g.drawFastHLine(2, 15, 60, C_RULE);
+
+  // Bottom row: B48 bus
+  g.fillRoundRect(2, 18, 11, 11, 3, C_B_BLUE);
+  printAt(g, 5, 20, 1, C_WHITE, "B");
+  if (bWarn) blit(g, WARN, 7, 17, 20, alertColor(t.bSev));
+  else printAt(g, 16, 20, 1, C_LABEL, t.bLabel);
+  drawDualTimes(g, 20, t.b1, t.b2, t.bLive1, t.bLive2);
 }
 
 // Full-screen single-route layout geometry (shared by the L and B48 screens)
@@ -395,7 +411,7 @@ static void drawBigTimes(Adafruit_GFX& g, int TX, int t1, int t2, uint16_t c1, u
   if (unit) customText(&g, FACE_MED, "m", x + 1, medY, hasSecond ? c2 : c1);
 }
 
-static void drawLOnly(Adafruit_GFX& g, const TransitData& t) {
+static void drawLOnly(Adafruit_GFX& g, const TransitData& t, uint32_t ms) {
   const int TX = BADGE_X + BADGE_D + 3;                    // text column starts at x = 27
 
   // Bullet: grey disc with a bold L, optically centred (nudged right 1 px
@@ -407,7 +423,8 @@ static void drawLOnly(Adafruit_GFX& g, const TransitData& t) {
 
   // Direction, cap height aligned with the top of the bullet
   const char* name = directionName(t.lLabel);
-  if (name) customText(&g, FACE_SMALL, name, TX, ROW_TOP, C_LABEL_SOFT);
+  if (t.lAlert[0] && showAlertNow(ms)) customText(&g, FACE_SMALL, t.lAlert, TX, ROW_TOP, alertColor(t.lSev));
+  else if (name) customText(&g, FACE_SMALL, name, TX, ROW_TOP, C_LABEL_SOFT);
   else printAt(g, TX, ROW_TOP, 1, C_LABEL_SOFT, t.lLabel);
 
   drawBigTimes(g, TX, t.l1, t.l2, C_AMBER, C_AMBER_2ND);    // subway times are always live
@@ -415,26 +432,81 @@ static void drawLOnly(Adafruit_GFX& g, const TransitData& t) {
 
 // Full-screen B48: blue rounded-square badge, "Northbound"/"Southbound",
 // amber = live GPS, white = scheduled.
-static void drawBusOnly(Adafruit_GFX& g, const TransitData& t) {
+static void drawBusOnly(Adafruit_GFX& g, const TransitData& t, uint32_t ms) {
   const int TX = BADGE_X + BADGE_D + 1;                    // x = 25 ("Northbound"/"Southbound" are 38 px wide)
   g.fillRoundRect(BADGE_X, BADGE_Y, BADGE_D, BADGE_D, 5, C_B_BLUE);
   const int bw = textWidth(FACE_MED, "B48");
   customText(&g, FACE_MED, "B48", BADGE_X + (BADGE_D - bw) / 2 + 1, BADGE_Y + (BADGE_D - MED_H) / 2, C_WHITE);
 
   const char* name = !strcmp(t.bLabel, "NB") ? "Northbound" : !strcmp(t.bLabel, "SB") ? "Southbound" : nullptr;
-  if (name) customText(&g, FACE_SMALL, name, TX, ROW_TOP, C_LABEL_SOFT);
+  if (t.bAlert[0] && showAlertNow(ms)) customText(&g, FACE_SMALL, t.bAlert, TX, ROW_TOP, alertColor(t.bSev));
+  else if (name) customText(&g, FACE_SMALL, name, TX, ROW_TOP, C_LABEL_SOFT);
   else printAt(g, TX, ROW_TOP, 1, C_LABEL_SOFT, t.bLabel);
 
   drawBigTimes(g, TX, t.b1, t.b2, t.bLive1 ? C_AMBER : C_WHITE, t.bLive2 ? C_AMBER_2ND : rgb565(220, 220, 220));
 }
 
-void drawTransit(Adafruit_GFX& g, const TransitData& t) {
+// ---------------------------------------------------------------------------
+// Clock:   10:42          big time, colon blinks
+//        Tue Nov 10       date -- or, if a watched route has a problem:
+//        (L) Delays       route bullet + what's wrong (alternates if both routes)
+// ---------------------------------------------------------------------------
+static const char* const DAYS[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+static const char* const MONTHS[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+
+static void drawClock(Adafruit_GFX& g, const TransitData& t, uint32_t ms, const ClockTime* now) {
+  if (!now || !now->valid) {                       // no NTP yet
+    customText(&g, FACE_BIG, "--:--", (SCREEN_W - textWidth(FACE_BIG, "--:--")) / 2, 6, C_DIM);
+    return;
+  }
+  const bool hasL = t.lAlert[0], hasB = t.bAlert[0];
+  const bool alert = hasL || hasB;
+
+  // Time (12-hour), centred; colon blinks once a second.
+  int h12 = now->hour % 12; if (h12 == 0) h12 = 12;
+  char hh[4], mm[4];
+  snprintf(hh, sizeof hh, "%d", h12);
+  snprintf(mm, sizeof mm, "%02d", now->minute);
+  const int colonW = 2, gap = 2;
+  const int w = textWidth(FACE_BIG, hh) + gap + colonW + gap + textWidth(FACE_BIG, mm);
+  const int x0 = (SCREEN_W - w) / 2, y0 = alert ? 3 : 5;
+  const uint16_t timeColor = rgb565(255, 225, 170);            // warm white
+  int x = x0 + customText(&g, FACE_BIG, hh, x0, y0, timeColor) + gap;
+  if (now->second % 2 == 0) customText(&g, FACE_BIG, ":", x, y0, timeColor);
+  x += colonW + gap;
+  customText(&g, FACE_BIG, mm, x, y0, timeColor);
+
+  if (!alert) {
+    char date[16];
+    snprintf(date, sizeof date, "%s %s %d", DAYS[now->wday % 7], MONTHS[now->mon % 12], now->mday);
+    customText(&g, FACE_SMALL, date, (SCREEN_W - textWidth(FACE_SMALL, date)) / 2, 23, C_LABEL);
+    return;
+  }
+
+  // Indicator strip: bullet + label. With two problems, alternate every 3 s.
+  const bool showL = hasL && (!hasB || (ms / 3000) % 2 == 0);
+  const char* label = showL ? t.lAlert : t.bAlert;
+  const uint16_t c = alertColor(showL ? t.lSev : t.bSev);
+  const int badgeW = showL ? 9 : 15, labelW = textWidth(FACE_SMALL, label);
+  const int bx = (SCREEN_W - (badgeW + 4 + labelW)) / 2, by = 21;
+  if (showL) {
+    fillDisc(g, bx, by, 9, C_L_GREY);
+    customText(&g, FACE_SMALL, "L", bx + 3, by + 2, C_WHITE);
+  } else {
+    g.fillRoundRect(bx, by, badgeW, 9, 2, C_B_BLUE);
+    customText(&g, FACE_SMALL, "B48", bx + 2, by + 2, C_WHITE);
+  }
+  customText(&g, FACE_SMALL, label, bx + badgeW + 4, by + 2, c);
+}
+
+void drawTransit(Adafruit_GFX& g, const TransitData& t, uint32_t ms, const ClockTime* now) {
   g.fillScreen(C_BLACK);
   switch (t.layout) {
-    case LAYOUT_L:   drawLOnly(g, t); break;
-    case LAYOUT_BUS: drawBusOnly(g, t); break;
-    case LAYOUT_OFF: break;                       // blank sign (idle animations still play)
-    default:         drawTwoRow(g, t); break;
+    case LAYOUT_L:     drawLOnly(g, t, ms); break;
+    case LAYOUT_BUS:   drawBusOnly(g, t, ms); break;
+    case LAYOUT_CLOCK: drawClock(g, t, ms, now); break;
+    case LAYOUT_OFF:   break;                       // blank sign (idle animations still play)
+    default:           drawTwoRow(g, t, ms); break;
   }
 }
 
