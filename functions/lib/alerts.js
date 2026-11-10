@@ -64,6 +64,17 @@ function summarize(subwayFeed, busFeed, nowMs = Date.now()) {
       }
     }
   };
+  // Diagnostics: how much of the real feed we could read (shown by the health check).
+  const routes = new Set();
+  let active = 0;
+  for (const e of (subwayFeed && subwayFeed.entity) || []) {
+    if (!e.alert || !isActive(e.alert, nowSec)) continue;
+    active++;
+    for (const ie of pick(e.alert, "informed_entity", "informedEntity") || []) {
+      const r = pick(ie, "route_id", "routeId"); if (r) routes.add(String(r));
+    }
+  }
+  out.stats = { subwayAlerts: ((subwayFeed && subwayFeed.entity) || []).length, activeNow: active, routesWithAlerts: [...routes].sort().slice(0, 40) };
   scan(subwayFeed, "L", (r) => r === "L");
   scan(busFeed, "B48", (r) => /(^|[_ ])B48$/.test(r) || r === "B48");
   return out;

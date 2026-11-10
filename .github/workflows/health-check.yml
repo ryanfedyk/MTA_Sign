@@ -32,7 +32,8 @@ jobs:
             const d = JSON.parse(require("fs").readFileSync(0, "utf8")).debug || {};
             const a = d.alerts || {};
             console.log("   feed reachable:", a.ok);
-            for (const r of ["L", "B48"]) console.log(`   ${r}:`, a[r] ? `${a[r].label || "good service"} ${a[r].headline ? "— " + a[r].headline : ""}` : "?");'
+            for (const r of ["L", "B48"]) console.log(`   ${r}:`, a[r] ? `${a[r].label || "good service"} ${a[r].headline ? "— " + a[r].headline : ""}` : "?");
+            if (a.stats) console.log(`   parsed ${a.stats.subwayAlerts} subway alerts, ${a.stats.activeNow} active now, on routes: ${a.stats.routesWithAlerts.join(" ")}`);'
           echo
           echo "== Raw MTA alert feed reachability (from GitHub)"
           curl -sS -o /dev/null -w "   subway-alerts.json HTTP %{http_code}, %{size_download} bytes\n" "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/camsys%2Fsubway-alerts.json"
