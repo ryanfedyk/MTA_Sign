@@ -58,3 +58,37 @@ test("bad ?at= is rejected", async () => {
   const { status } = await call(transit, { query: { at: "not-a-date" } });
   assert.strictEqual(status, 400);
 });
+
+test("B48: buses at the terminal / on their previous run still count (matches other apps)", () => {
+  const { parseBus } = require("../lib/transit");
+  const now = Date.parse("2026-11-12T12:25:00Z");
+  const iso = (m) => new Date(now + m * 60000).toISOString();
+  const visit = (trip, vehicle, progress, expMin, aimedMin) => ({ MonitoredVehicleJourney: {
+    PublishedLineName: "B48", VehicleRef: vehicle, ProgressStatus: progress,
+    FramedVehicleJourneyRef: { DatedVehicleJourneyRef: trip },
+    MonitoredCall: { ExpectedArrivalTime: expMin == null ? undefined : iso(expMin), AimedArrivalTime: iso(aimedMin) } } });
+  // This morning's case: #7211 en route (11 min), #9551 on layover at the terminal (19 min),
+  // a scheduled trip (30 min) that only OneBusAway knows, #5009 on its previous run with no prediction (63 min).
+  const siri = { Siri: { ServiceDelivery: { StopMonitoringDelivery: [{ MonitoredStopVisit: [
+    visit("T403", "MTA NYCT_7211", undefined, 11.5, 9),
+    visit("T416", "MTA NYCT_9551", "layover", 19.4, 17),
+    visit("T409", "MTA NYCT_5009", "prevTrip", null, 63.2),
+  ] }] } } };
+  const oba = { currentTime: now, data: { arrivalsAndDepartures: [
+    { routeShortName: "B48", tripId: "T417", predicted: false, scheduledArrivalTime: now + 30.2 * 60000 },
+  ] } };
+  const { arrivals } = parseBus(oba, siri, now);
+  assert.deepStrictEqual(arrivals.map((a) => [a.min, a.live]), [[11, true], [19, true], [30, false], [63, false]]);
+});
+
+test("B48: the same trip in both feeds is counted once, preferring the live prediction", () => {
+  const { parseBus } = require("../lib/transit");
+  const now = Date.now();
+  const siri = { Siri: { ServiceDelivery: { StopMonitoringDelivery: [{ MonitoredStopVisit: [{ MonitoredVehicleJourney: {
+    VehicleRef: "v1", FramedVehicleJourneyRef: { DatedVehicleJourneyRef: "T1" },
+    MonitoredCall: { ExpectedArrivalTime: new Date(now + 7.3 * 60000).toISOString() } } }] }] } } };
+  const oba = { currentTime: now, data: { arrivalsAndDepartures: [
+    { routeShortName: "B48", tripId: "T1", predicted: false, scheduledArrivalTime: now + 5 * 60000 },
+  ] } };
+  assert.deepStrictEqual(parseBus(oba, siri, now).arrivals, [{ min: 7, live: true }]);
+});

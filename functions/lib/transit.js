@@ -29,64 +29,66 @@ function parseL(feed, track, nowMs) {
   return { t1, t2 };
 }
 
-/** Merge OneBusAway timetable + SIRI live GPS into a sorted list of {min, live}. */
+/**
+ * Merge OneBusAway (timetable) + SIRI (live vehicles) into a sorted list of
+ * {min, live}, one entry per trip.
+ *
+ * What the MTA feeds actually do (checked against live data):
+ *  - SIRI lists every trip that has a bus assigned -- including buses waiting
+ *    at the terminal ("layover") or still finishing their previous run
+ *    ("prevTrip"). Those still carry an ExpectedArrivalTime when the MTA can
+ *    predict them, and other apps show them as live.
+ *  - OneBusAway lists trips with *no* bus assigned yet (scheduled only).
+ * So trips are matched by trip id; a trip is "live" whenever there's a real
+ * prediction, and an assigned bus without one falls back to its schedule
+ * instead of disappearing.
+ */
 function parseBus(oba, siri, nowMs) {
-  const arrivalsMap = new Map();
-  let obaCount = 0;
+  const trips = new Map();   // tripId -> { ms, live }
+  let obaCount = 0, anon = 0;
+  const put = (trip, ms, live) => {
+    const key = trip || `anon-${anon++}`;
+    const prev = trips.get(key);
+    if (!prev || (live && !prev.live)) trips.set(key, { ms, live });
+  };
 
-  if (oba?.data) {
-    const serverTime = oba.currentTime || nowMs;
-    const list = oba.data.arrivalsAndDepartures || oba.data.entry?.arrivalsAndDepartures || [];
-    obaCount = list.length;
-
-    for (const item of list) {
-      const route = item.routeShortName || item.routeId || "";
-      if (route && !route.includes("B48")) continue;
-
-      // A bus is live ONLY if predicted is explicitly true and predictedArrivalTime > 0
-      const isLive = Boolean(item.predicted) && Boolean(item.predictedArrivalTime && item.predictedArrivalTime > 0);
-      const targetMs = (isLive && item.predictedArrivalTime)
-        ? item.predictedArrivalTime
-        : (item.scheduledArrivalTime || item.scheduledDepartureTime);
-      if (!targetMs) continue;
-
-      const diffMs = targetMs - serverTime;
-      let mins = -1;
-      if (diffMs >= 45000) mins = Math.floor(diffMs / 60000);
-      else if (diffMs >= -90000) mins = 0;
-
-      if (mins >= 0) {
-        const existing = arrivalsMap.get(mins);
-        if (!existing || isLive) arrivalsMap.set(mins, { min: mins, live: isLive });
-      }
-    }
-  }
-
-  // Secondary pass: mark/insert vehicles SIRI confirms are tracked by GPS
+  // 1. Live vehicles (SIRI)
   const visits = siri?.Siri?.ServiceDelivery?.StopMonitoringDelivery?.[0]?.MonitoredStopVisit || [];
   for (const visit of visits) {
     const journey = visit.MonitoredVehicleJourney || {};
+    const route = String(journey.PublishedLineName || journey.LineRef || "");
+    if (route && !route.includes("B48")) continue;
     const call = journey.MonitoredCall || {};
-    const expTime = call.ExpectedArrivalTime || call.ExpectedDepartureTime;
-    const status = journey.ProgressStatus || "";
+    const expected = Date.parse(call.ExpectedArrivalTime || call.ExpectedDepartureTime || "");
+    const aimed = Date.parse(call.AimedArrivalTime || call.AimedDepartureTime || "");
+    const trip = journey.FramedVehicleJourneyRef?.DatedVehicleJourneyRef;
+    if (Number.isFinite(expected) && journey.VehicleRef) put(trip, expected, true);
+    else if (Number.isFinite(aimed)) put(trip, aimed, false);
+  }
 
-    const isLive = Boolean(journey.VehicleRef) && Boolean(expTime) && !status.includes("layover");
-    const chosenTime = expTime || call.AimedArrivalTime || call.AimedDepartureTime;
-    let mins = -1;
-    if (chosenTime) {
-      const diffSec = Math.floor((new Date(chosenTime).getTime() - nowMs) / 1000);
-      if (diffSec >= 45) mins = Math.floor(diffSec / 60);
-      else if (diffSec >= -120) mins = 0;
-    }
-
-    if (mins >= 0 && isLive) {
-      const existing = arrivalsMap.get(mins) || arrivalsMap.get(mins - 1) || arrivalsMap.get(mins + 1);
-      if (existing) existing.live = true;
-      else arrivalsMap.set(mins, { min: mins, live: true });
+  // 2. Timetable (OneBusAway): scheduled trips, plus any predictions it has
+  if (oba?.data) {
+    const offset = (oba.currentTime || nowMs) - nowMs;   // OBA times are relative to its own clock
+    const list = oba.data.arrivalsAndDepartures || oba.data.entry?.arrivalsAndDepartures || [];
+    obaCount = list.length;
+    for (const item of list) {
+      const route = item.routeShortName || item.routeId || "";
+      if (route && !route.includes("B48")) continue;
+      const predicted = Boolean(item.predicted) && item.predictedArrivalTime > 0;
+      const t = predicted ? item.predictedArrivalTime : (item.scheduledArrivalTime || item.scheduledDepartureTime);
+      if (t) put(item.tripId, t - offset, predicted);
     }
   }
 
-  return { arrivals: Array.from(arrivalsMap.values()).sort((a, b) => a.min - b.min), obaCount };
+  // 3. Minutes away (arriving now = 0); drop buses that have already gone
+  const arrivals = [];
+  for (const { ms, live } of trips.values()) {
+    const diff = ms - nowMs;
+    if (diff >= 45000) arrivals.push({ min: Math.floor(diff / 60000), live });
+    else if (diff >= -90000) arrivals.push({ min: 0, live });
+  }
+  arrivals.sort((x, y) => x.min - y.min || Number(y.live) - Number(x.live));
+  return { arrivals, obaCount };
 }
 
 // Trimmed view of both bus feeds, for diagnosing mismatches with other apps.
