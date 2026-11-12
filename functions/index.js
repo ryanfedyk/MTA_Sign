@@ -61,7 +61,8 @@ exports.transit = onRequest(HTTP_OPTS, async (req, res) => {
     const alerts = await currentAlerts();
     const plan = planFor(now, { busDir: req.query.dir }, blocks, alerts);
     plan.alerts = alerts;
-    const body = await buildArrivals(plan, { busKey, debug: req.query.debug === "1" });
+    const debug = req.query.debug === "1" ? true : req.query.debug === "raw" ? "raw" : false;
+    const body = await buildArrivals(plan, { busKey, debug });
     res.json(body);
   } catch (err) {
     res.status(500).json({ error: err.message });

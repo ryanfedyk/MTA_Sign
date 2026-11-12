@@ -89,6 +89,29 @@ function parseBus(oba, siri, nowMs) {
   return { arrivals: Array.from(arrivalsMap.values()).sort((a, b) => a.min - b.min), obaCount };
 }
 
+// Trimmed view of both bus feeds, for diagnosing mismatches with other apps.
+function rawBus(oba, siri, nowMs) {
+  const min = (t) => (t ? Math.round((t - nowMs) / 6000) / 10 : null);
+  const list = oba?.data?.arrivalsAndDepartures || oba?.data?.entry?.arrivalsAndDepartures || [];
+  const visits = siri?.Siri?.ServiceDelivery?.StopMonitoringDelivery?.[0]?.MonitoredStopVisit || [];
+  return {
+    oba: list.map((i) => ({
+      route: i.routeShortName, trip: i.tripId, vehicle: i.vehicleId || null, predicted: i.predicted,
+      predMin: min(i.predictedArrivalTime || i.predictedDepartureTime), schedMin: min(i.scheduledArrivalTime || i.scheduledDepartureTime),
+      stopsAway: i.numberOfStopsAway, status: i.tripStatus?.status, phase: i.tripStatus?.phase,
+    })),
+    siri: visits.map((v) => {
+      const j = v.MonitoredVehicleJourney || {}, c = j.MonitoredCall || {};
+      return {
+        trip: j.FramedVehicleJourneyRef?.DatedVehicleJourneyRef, vehicle: j.VehicleRef, progress: j.ProgressStatus || null,
+        expMin: min(Date.parse(c.ExpectedArrivalTime || c.ExpectedDepartureTime || "") || 0),
+        aimedMin: min(Date.parse(c.AimedArrivalTime || c.AimedDepartureTime || "") || 0),
+        away: c.Extensions?.Distances?.PresentableDistance || null,
+      };
+    }),
+  };
+}
+
 const getJson = (url) => fetch(url).then((r) => r.json());
 
 /**
@@ -135,6 +158,7 @@ async function buildArrivals(plan, { busKey, now = new Date(), debug = false } =
   }
   if (debug) {
     response.debug = { plan: { ...plan, alerts: undefined }, alerts: al, obaArrivalsCount: bus.obaCount, totalMerged: a.length, allMergedArrivals: a };
+    if (debug === "raw") response.debug.raw = rawBus(value(obaRes), value(siriRes), nowMs);
   }
   return response;
 }

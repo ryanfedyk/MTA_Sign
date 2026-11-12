@@ -10,6 +10,10 @@ on:
         description: "Also send a test 'peek' cat to the sign"
         type: boolean
         default: false
+      bus_debug:
+        description: "Also dump what both MTA bus feeds report for the B48 stop"
+        type: boolean
+        default: false
       test_gemini:
         description: "Also ask Gemini for a test animation (saved, then deleted)"
         type: boolean
@@ -73,6 +77,18 @@ jobs:
                 -d "{\"id\":\"$(cat /tmp/anim_id)\"}" "$BASE/app/api/animations/delete" && echo "   (test animation deleted)"
             fi
             echo
+          fi
+          if [ "${{ inputs.bus_debug }}" = "true" ]; then
+            for DIR in SB NB; do
+              echo "== B48 $DIR: raw feeds (minutes from now)"
+              curl -sS "$BASE/transit?debug=raw&dir=$DIR" | node -e '
+                const d = JSON.parse(require("fs").readFileSync(0, "utf8"));
+                console.log("   sign shows:", JSON.stringify(d.b));
+                console.log("   merged:", JSON.stringify(d.debug.allMergedArrivals));
+                console.log("   OneBusAway:"); for (const x of d.debug.raw.oba) console.log("     ", JSON.stringify(x));
+                console.log("   SIRI:"); for (const x of d.debug.raw.siri) console.log("     ", JSON.stringify(x));'
+              echo
+            done
           fi
           echo "How to read this:"
           echo " - /app HTTP 503 mentioning the database -> Firestore isn't set up (see README)."
