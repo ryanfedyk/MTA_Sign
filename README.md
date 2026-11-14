@@ -173,8 +173,9 @@ Under **Make your own** in the control panel:
   stop and sit, peek up, stay put), something for it to chase, direction, speed, row,
   and a background (over the arrivals, black, or one of your photos). It's instant and
   free, and uses the same hand-drawn sprites as the built-in cats.
-- **Upload image:** choose a photo. It's cropped or fitted to 64×32, dithered for LEDs,
-  and shown for 5–15 seconds.
+- **Upload image:** choose a photo, then frame it yourself. Drag to position it, and
+  pinch, scroll, or use the slider to zoom. **Fill the sign** and **Fit whole photo**
+  are shortcuts. It's dithered for LEDs and shown for 5–15 seconds.
 
 Saved items appear under **Your animations**, where you can play them or add them to
 the idle rotation. The sprite library is in `functions/lib/assets.js`.

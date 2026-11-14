@@ -226,6 +226,11 @@
   .ledcv.framed { border: 9px solid transparent; border-radius: 16px;
     background: linear-gradient(var(--screen), var(--screen)) padding-box,
                 repeating-linear-gradient(93deg, #c49c6e 0 3px, #bf9667 3px 7px, #c8a174 7px 9px, #bd9364 9px 14px) border-box; }
+  .cropcv { width: 100%; height: auto; display: block; border-radius: 12px; touch-action: none; cursor: grab; margin-top: 12px;
+    background: #000; box-shadow: 0 0 0 1px var(--line); }
+  .cropcv:active { cursor: grabbing; }
+  .zoomrow { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 18px; }
+  .zoomrow input { flex: 1; }
   .kv { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
   .kv span:first-child { color: var(--muted); }
   .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: flex; justify-content: center; gap: 4px;
@@ -364,8 +369,12 @@
           <div id="imagePane" class="hidden">
             <p class="sub">Show a photo on the sign. It's cropped to 64×32 and tuned for LEDs.</p>
             <label class="filebtn">Choose a photo…<input type="file" id="imgFile" accept="image/*"></label>
-            <div class="lbl">Framing</div>
-            <div class="seg" id="imgFit"><button data-v="cover" class="sel">Fill (crop)</button><button data-v="contain">Fit whole image</button></div>
+                        <div id="cropWrap" class="hidden">
+              <canvas id="cropCv" class="cropcv" width="640" height="320"></canvas>
+              <div class="hint" style="text-align:center;margin:6px 0 2px">Drag to position · pinch, scroll or slide to zoom</div>
+              <div class="zoomrow"><span>−</span><input type="range" id="cropZoom" min="0" max="1000" value="0"><span>+</span></div>
+              <div class="row2"><button class="btn small ghost" id="cropFill">Fill the sign</button><button class="btn small ghost" id="cropFit">Fit whole photo</button></div>
+            </div>
             <div class="lbl">Show for</div>
             <div class="seg" id="imgDur"><button data-v="5000">5 s</button><button data-v="10000" class="sel">10 s</button><button data-v="15000">15 s</button></div>
           </div>
@@ -699,7 +708,7 @@ async function refreshPreview() {
       led.className = "led big";
       led.innerHTML = `<div class="row"><div class="badge l">L</div><div>
         <div class="times">${d.l.t1 < 0 ? '<span class="none">– –</span>' : `<span class="live" style="font-size:26px">${t(d.l.t1)}${d.l.t2 >= 0 ? ", " + t(d.l.t2) : ""}m</span>`}</div></div>
-        <span class="dcode">${d.la ? "⚠" : d.l.dir}</span></div>
+        <span class="dcode">${d.la ? "⚠" : d.l.dir === "MN" ? "MAN" : d.l.dir}</span></div>
         <div class="heroclock">${n.getHours() % 12 || 12}:${String(n.getMinutes()).padStart(2, "0")}<span>${n.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).replace(",", "")}</span></div>`;
     } else if (d.lay === "L") {
       const names = { MN: "Manhattan", BK: "Brooklyn" };
@@ -714,7 +723,7 @@ async function refreshPreview() {
     } else {
       led.className = "led";
       led.innerHTML =
-        `<div class="row"><div class="badge l">L</div><div class="dir">${d.l.dir}</div><div class="times">${timesHtml(d.l.t1, d.l.t2, true, true)}</div></div>` +
+        `<div class="row"><div class="badge l">L</div><div class="dir">${d.l.dir === "MN" ? "MA" : d.l.dir}</div><div class="times">${timesHtml(d.l.t1, d.l.t2, true, true)}</div></div>` +
         `<div class="row"><div class="badge b">B</div><div class="dir">${d.b.dir}</div><div class="times">${timesHtml(d.b.t1, d.b.t2, d.b.live1, d.b.live2)}</div></div>`;
     }
   } catch { /* keep last */ }
@@ -1044,18 +1053,41 @@ $("makeTabs").onclick = (e) => {
 };
 $("makeName").oninput = () => { nameTouched = true; };
 
-// ---- image upload: crop/fit to 64x32, dither to RGB332 ----
-let imgFile = null, imgFit = "cover", imgDur = 10000;
+// ---- image upload: you choose the crop; it's dithered to 64x32 RGB332 ----
+let imgFile = null, imgDur = 10000, bmp = null;
+const crop = { z: 1, cx: 0, cy: 0 };        // z = zoom relative to "fill the sign"; (cx, cy) = image point at the center
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
-async function processImage() {
-  if (!imgFile) return;
-  const bmp = await createImageBitmap(imgFile);
+const coverScale = (w, h) => Math.max(w / bmp.width, h / bmp.height);
+const zMin = () => Math.min(W / bmp.width, H / bmp.height) / coverScale(W, H);   // "fit whole photo"
+const Z_MAX = 6;
+
+function clampCrop() {
+  crop.z = Math.min(Z_MAX, Math.max(zMin(), crop.z));
+  const sc = coverScale(W, H) * crop.z;            // the sign and the crop box are both 2:1
+  const halfW = W / 2 / sc, halfH = H / 2 / sc;
+  crop.cx = bmp.width <= halfW * 2 ? bmp.width / 2 : Math.min(bmp.width - halfW, Math.max(halfW, crop.cx));
+  crop.cy = bmp.height <= halfH * 2 ? bmp.height / 2 : Math.min(bmp.height - halfH, Math.max(halfH, crop.cy));
+}
+// Draws the current crop into any 2:1 canvas context.
+function drawCrop(ctx, w, h) {
+  const sc = coverScale(w, h) * crop.z;
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h);
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(bmp, w / 2 - crop.cx * sc, h / 2 - crop.cy * sc, bmp.width * sc, bmp.height * sc);
+}
+function zoomToSlider() { const t = Math.log(crop.z / zMin()) / Math.log(Z_MAX / zMin()); $("cropZoom").value = Math.round(t * 1000); }
+
+let renderQueued = false;
+function cropChanged() {
+  clampCrop();
+  const cv = $("cropCv"); drawCrop(cv.getContext("2d"), cv.width, cv.height);
+  zoomToSlider();
+  if (!renderQueued) { renderQueued = true; requestAnimationFrame(() => { renderQueued = false; renderImageSpec(); }); }
+}
+
+function renderImageSpec() {
   const c = document.createElement("canvas"); c.width = W; c.height = H;
-  const x = c.getContext("2d"); x.fillStyle = "#000"; x.fillRect(0, 0, W, H);
-  x.imageSmoothingQuality = "high";
-  const sc = imgFit === "cover" ? Math.max(W / bmp.width, H / bmp.height) : Math.min(W / bmp.width, H / bmp.height);
-  const dw = bmp.width * sc, dh = bmp.height * sc;
-  x.drawImage(bmp, (W - dw) / 2, (H - dh) / 2, dw, dh);
+  const x = c.getContext("2d"); drawCrop(x, W, H);
   const d = x.getImageData(0, 0, W, H).data, out = new Uint8Array(W * H);
   for (let p = 0; p < W * H; p++) {
     const t = (BAYER[(Math.floor(p / W) % 4) * 4 + (p % W) % 4] / 16 - 0.5);   // ordered dithering = smoother gradients
@@ -1067,8 +1099,43 @@ async function processImage() {
   imgSpec = { name, duration_ms: imgDur, background: "black", palette: {}, sprites: [], actors: [], image: { rgb332: btoa(bin) } };
   showMake(imgSpec);
 }
-$("imgFile").onchange = (e) => { imgFile = e.target.files[0]; nameTouched = false; processImage().catch((err) => toast("Couldn't read that image")); };
-$("imgFit").onclick = (e) => { const v = e.target.dataset.v; if (v) { imgFit = v; seg("imgFit", v); processImage(); } };
+
+$("imgFile").onchange = async (e) => {
+  imgFile = e.target.files[0]; nameTouched = false;
+  if (!imgFile) return;
+  try { bmp = await createImageBitmap(imgFile); } catch { toast("Couldn't read that image"); return; }
+  crop.z = 1; crop.cx = bmp.width / 2; crop.cy = bmp.height / 2;
+  $("cropWrap").classList.remove("hidden");
+  cropChanged();
+};
+$("cropZoom").oninput = () => { if (!bmp) return; const t = $("cropZoom").value / 1000; crop.z = zMin() * Math.pow(Z_MAX / zMin(), t); cropChanged(); };
+$("cropFill").onclick = () => { if (bmp) { crop.z = 1; cropChanged(); } };
+$("cropFit").onclick = () => { if (bmp) { crop.z = zMin(); cropChanged(); } };
+
+// Drag to pan, pinch / scroll to zoom
+(() => {
+  const cv = $("cropCv"), pts = new Map();
+  let pinch = null;
+  const perPx = () => cv.width / cv.getBoundingClientRect().width;      // canvas px per CSS px
+  cv.addEventListener("pointerdown", (e) => { cv.setPointerCapture(e.pointerId); pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); });
+  cv.addEventListener("pointermove", (e) => {
+    if (!bmp || !pts.has(e.pointerId)) return;
+    const prev = pts.get(e.pointerId); pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 2) {
+      const [a, b] = [...pts.values()], dist = Math.hypot(a.x - b.x, a.y - b.y);
+      if (pinch) crop.z *= dist / pinch;
+      pinch = dist;
+    } else {
+      const sc = coverScale(cv.width, cv.height) * crop.z;
+      crop.cx -= (e.clientX - prev.x) * perPx() / sc;
+      crop.cy -= (e.clientY - prev.y) * perPx() / sc;
+    }
+    cropChanged();
+  });
+  const end = (e) => { pts.delete(e.pointerId); if (pts.size < 2) pinch = null; };
+  cv.addEventListener("pointerup", end); cv.addEventListener("pointercancel", end);
+  cv.addEventListener("wheel", (e) => { if (!bmp) return; e.preventDefault(); crop.z *= Math.exp(-e.deltaY * 0.0015); cropChanged(); }, { passive: false });
+})();
 $("imgDur").onclick = (e) => { const v = e.target.dataset.v; if (v) { imgDur = Number(v); seg("imgDur", v); if (imgSpec) { imgSpec.duration_ms = imgDur; showMake(imgSpec); } } };
 
 $("makeSave").onclick = async () => {

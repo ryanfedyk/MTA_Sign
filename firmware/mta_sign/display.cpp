@@ -355,7 +355,7 @@ static void drawTwoRow(Adafruit_GFX& g, const TransitData& t, uint32_t ms) {
   g.fillRoundRect(2, 2, 11, 11, 3, C_L_GREY);
   printAt(g, 5, 4, 1, C_WHITE, "L");
   if (lWarn) blit(g, WARN, 7, 17, 4, alertColor(t.lSev));
-  else printAt(g, 16, 4, 1, C_LABEL, t.lLabel);
+  else printAt(g, 16, 4, 1, C_LABEL, !strcmp(t.lLabel, "MN") ? "MA" : t.lLabel);   // Manhattan = "MA" (2 letters fit here)
   drawDualTimes(g, 4, t.l1, t.l2, true, true);
 
   g.drawFastHLine(2, 15, 60, C_RULE);
@@ -660,7 +660,8 @@ static void drawRouteClock(Adafruit_GFX& g, const TransitData& t, uint32_t ms, c
   if (alert[0]) {
     blit(g, WARN, 7, SCREEN_W - 3 - 7, BY + 2, alertColor(bus ? t.bSev : t.lSev));
   } else {
-    const char* code = bus ? t.bLabel : t.lLabel;          // MN / BK / NB / SB
+    const char* code = bus ? t.bLabel : (!strcmp(t.lLabel, "MN") ? "MAN" : t.lLabel);   // MAN / BK / NB / SB
+    if (!strcmp(code, "MAN") && x + 3 + textWidth(FACE_SMALL, code) > SCREEN_W - 2) code = "MA";   // tight: shorter form
     const int cw = textWidth(FACE_SMALL, code);
     if (x + 3 + cw <= SCREEN_W - 2) customText(&g, FACE_SMALL, code, SCREEN_W - 2 - cw, BY + BD - 5, C_LABEL);
   }
