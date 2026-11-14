@@ -49,6 +49,14 @@ jobs:
           if [ -z "$SIGN_APP_PIN" ]; then echo "   SIGN_APP_PIN secret is not set"; exit 0; fi
           curl -sS -w "\n   HTTP %{http_code}\n" -H "x-sign-pin: $SIGN_APP_PIN" "$BASE/app/api/settings"
           echo
+          echo "== Saved schedule (what should show when)"
+          curl -sS -H "x-sign-pin: $SIGN_APP_PIN" "$BASE/app/api/schedule" | node -e '
+            const d = JSON.parse(require("fs").readFileSync(0, "utf8"));
+            const D = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"], t = (m) => String(Math.floor(m/60)).padStart(2,"0") + ":" + String(m%60).padStart(2,"0");
+            console.log("   showing now:", d.now, "| original rules:", d.isDefault);
+            (d.blocks || []).forEach((b, i) => console.log(`   ${i+1}. ${b.days.map((x) => D[x]).join(",")} ${t(b.from)}-${t(b.to)} mode=${b.mode} L=${b.L}/${b.Lwhen} B48=${b.B48}/${b.Bwhen}`));'
+          echo "   right now /transit says:"; curl -sS "$BASE/transit" | head -c 300; echo
+          echo
           if [ "${{ inputs.play_cat }}" = "true" ]; then
             echo "== Sending a test cat (peek) through the control panel API"
             curl -sS -w "\n   HTTP %{http_code}\n" -X POST -H "content-type: application/json" \
