@@ -69,10 +69,24 @@ test("custom blocks: first match wins, layouts follow what's on", () => {
   assert.strictEqual(describePlan(p), "L to Brooklyn + B48 northbound");
 });
 
-test("outside every block: L to Manhattan only", () => {
-  const p = planFor(at("2026-11-04T09:00:00-05:00"), {}, [{ days: [0], from: 0, to: 60, L: "off", B48: "off" }]);
-  assert.strictEqual(p.layout, "L");
-  assert.strictEqual(p.l.label, "MN");
+test("times outside every period show the chosen fallback (default: clock watching the L)", () => {
+  const blocks = [{ days: [0], from: 0, to: 60, L: "off", B48: "off" }];
+  const wed = at("2026-11-04T09:00:00-05:00");
+  const c = planFull(wed, {}, blocks);
+  assert.strictEqual(c.layout, "clock");
+  assert.deepStrictEqual(c.watch, { L: true, B48: false });
+  assert.strictEqual(planFor(wed, {}, blocks, {}, "L").layout, "L");
+  assert.strictEqual(planFor(wed, {}, blocks, {}, "none").layout, "off");
+});
+
+test("the reported schedule: Saturday afternoon is a gap -> clock, not L + clock", () => {
+  const blocks = [
+    { days: [1, 2, 3, 4, 5], from: 420, to: 480, mode: "arrivals", L: "MN", B48: "SB", Lwhen: "issues", Bwhen: "always" },
+    { days: [1, 2, 3, 4, 5], from: 480, to: 975, mode: "clock", L: "MN", B48: "NB" },
+    { days: [0, 6], from: 0, to: 720, mode: "clock", L: "MN", B48: "off", Lwhen: "issues" },
+  ];
+  assert.strictEqual(planFor(at("2026-11-14T12:27:00-05:00"), {}, blocks).layout, "clock");
+  assert.strictEqual(planFor(at("2026-11-14T12:27:00-05:00"), {}, blocks, {}, "L").layout, "L");
 });
 
 test("validateBlocks cleans input and rejects nonsense", () => {

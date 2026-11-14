@@ -29,7 +29,9 @@ problem". Tap a period to edit it:
 - **Also watch:** for routes that aren't shown, appear or add an indicator only when
   they have delays, a suspension, or service changes.
 
-If periods overlap, the higher one wins. Any time not covered shows the L to Manhattan.
+If periods overlap, the higher one wins. The card lists any hours that no period covers.
+**Times not covered show** decides what appears then: **Clock** (the default, still
+watching the L for problems), **L train**, or **Nothing**.
 Problems come from the MTA's GTFS-realtime service-alert feeds. If the MTA ever
 requires a key, add it as the `MTA_API_KEY` secret.
 

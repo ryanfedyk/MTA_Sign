@@ -33,11 +33,13 @@ const HTTP_OPTS = { cors: true, memory: "256MiB", timeoutSeconds: 15 };
 const { getStore } = require("./lib/store");
 
 // The schedule changes rarely, so each server instance keeps it for 30 s.
-let cachedBlocks = null, cachedAt = 0;
+let cachedBlocks = null, cachedFallback = "clock", cachedAt = 0;
 async function scheduleBlocks() {
   if (Date.now() - cachedAt < 30000) return cachedBlocks;
   try {
-    cachedBlocks = (await getStore().get()).schedule.blocks;   // null = original rules
+    const sch = (await getStore().get()).schedule;
+    cachedBlocks = sch.blocks;   // null = original rules
+    cachedFallback = sch.fallback;
   } catch (e) {
     console.error("schedule unavailable, using defaults:", e.message);
   }
@@ -59,7 +61,7 @@ exports.transit = onRequest(HTTP_OPTS, async (req, res) => {
 
     const blocks = await scheduleBlocks();
     const alerts = await currentAlerts();
-    const plan = planFor(now, { busDir: req.query.dir }, blocks, alerts);
+    const plan = planFor(now, { busDir: req.query.dir }, blocks, alerts, cachedFallback);
     plan.alerts = alerts;
     const debug = req.query.debug === "1" ? true : req.query.debug === "raw" ? "raw" : false;
     const body = await buildArrivals(plan, { busKey, debug });
@@ -198,18 +200,26 @@ exports.app = onRequest({ ...HTTP_OPTS, memory: "512MiB", timeoutSeconds: 300 },
     // ---- schedule ----
     if (route === "/api/schedule" && (req.method === "GET" || req.method === "POST")) {
       if (req.method === "POST") {
-        let blocks = null;   // null = back to the original rules
-        if (!body.reset) {
-          try { blocks = schedule.validateBlocks(body.blocks); } catch (e) { return res.status(400).json({ error: e.message }); }
+        const patch = {};
+        if (body.reset) { patch.blocks = null; patch.fallback = "clock"; }
+        else {
+          if (body.blocks !== undefined) {
+            try { patch.blocks = schedule.validateBlocks(body.blocks); } catch (e) { return res.status(400).json({ error: e.message }); }
+          }
+          if (body.fallback !== undefined) {
+            if (!schedule.FALLBACK_CHOICES.includes(body.fallback)) return res.status(400).json({ error: "unknown fallback" });
+            patch.fallback = body.fallback;
+          }
         }
-        await s.update({ schedule: { blocks } });
+        await s.update({ schedule: patch });
         cachedAt = 0;
       }
-      const blocks = (await s.get()).schedule.blocks;
-      const now = planFor(new Date(), {}, blocks);
+      const sch = (await s.get()).schedule;
+      const now = planFor(new Date(), {}, sch.blocks, {}, sch.fallback);
       return res.json({
-        blocks: blocks || schedule.DEFAULT_BLOCKS,
-        isDefault: !blocks,
+        blocks: sch.blocks || schedule.DEFAULT_BLOCKS,
+        fallback: sch.fallback,
+        isDefault: !sch.blocks,
         defaults: schedule.DEFAULT_BLOCKS,
         now: schedule.describePlan(now),
       });

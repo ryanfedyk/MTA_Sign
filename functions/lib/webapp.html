@@ -129,6 +129,8 @@
   .route .seg button { font-size: 13px; padding: 7px 2px; }
   .nowline { font-size: 14px; margin-bottom: 12px; }
   .modeseg { margin-bottom: 8px; }
+  .gaps { font-size: 13px; color: var(--muted); background: var(--card2); border-radius: 10px; padding: 10px 12px; margin: 4px 0 6px; }
+  .gaps b { color: var(--text); font-weight: 600; }
   .period { border: 1px solid var(--line); border-radius: 14px; margin-bottom: 8px; background: var(--card); overflow: hidden; }
   .period.open { border-color: #cfc7bb; box-shadow: 0 4px 14px rgba(40,30,20,.06); }
   .psum { width: 100%; display: flex; align-items: center; gap: 12px; background: none; border: 0; padding: 12px; text-align: left; font: inherit; color: var(--text); cursor: pointer; }
@@ -466,7 +468,10 @@
         <h2>Schedule</h2>
         <p class="sub">Showing now: <b id="schedNow" class="amber">…</b></p>
         <div id="blocks"></div>
-        <p class="hint" style="margin-bottom:10px">If periods overlap, the higher one wins. Any time not covered shows the L to Manhattan.</p>
+        <div class="gaps" id="gaps"></div>
+        <div class="lbl">Times not covered show</div>
+        <div class="seg" id="fallback"><button data-v="clock">Clock</button><button data-v="L">L train</button><button data-v="none">Nothing</button></div>
+        <p class="hint" style="margin:8px 0 10px">If periods overlap, the higher one wins. The fallback clock still shows an L problem indicator.</p>
         <div class="row2">
           <button class="btn small ghost" id="addBlock">+ Add time period</button>
           <button class="btn small ghost" id="resetSched">Reset to original</button>
@@ -1189,9 +1194,41 @@ function summary(b) {
   return { days, time, what: what + extra, show: m.show };
 }
 
+// Which hours aren't covered by any period, grouped by day ("Sat, Sun: 12 PM – midnight").
+let FALLBACK = "clock";
+function computeGaps() {
+  const covered = Array.from({ length: 7 }, () => new Uint8Array(1440));
+  for (const b of BLOCKS) for (const d of b.days) {
+    if (b.from <= b.to) covered[d].fill(1, b.from, b.to);
+    else { covered[d].fill(1, b.from, 1440); covered[(d + 1) % 7].fill(1, 0, b.to); }
+  }
+  const byPattern = new Map();
+  DAY_ORDER.forEach((d) => {
+    const ranges = []; let start = -1;
+    for (let m = 0; m <= 1440; m++) {
+      const gap = m < 1440 && !covered[d][m];
+      if (gap && start < 0) start = m;
+      if (!gap && start >= 0) { ranges.push(`${fmtT(start)} – ${m >= 1440 ? "midnight" : fmtT(m)}`); start = -1; }
+    }
+    if (!ranges.length) return;
+    const key = ranges.join(", ").replace("12 AM – midnight", "all day");
+    byPattern.set(key, [...(byPattern.get(key) || []), ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d]]);
+  });
+  const daysLabel = (days) => days.join(",") === "Mon,Tue,Wed,Thu,Fri" ? "Weekdays" : days.join(",") === "Sat,Sun" ? "Weekends"
+    : days.length === 7 ? "Every day" : days.join(", ");
+  return [...byPattern.entries()].map(([r, days]) => `${daysLabel(days)}: ${r}`);
+}
+function renderGaps() {
+  const g = computeGaps(), what = { clock: "the clock", L: "the L train", none: "nothing" }[FALLBACK];
+  $("gaps").innerHTML = g.length ? `<b>Not covered</b> (shows ${what}):<br>${g.join("<br>")}` : "<b>Every hour is covered.</b>";
+  seg("fallback", FALLBACK);
+}
+$("fallback").onclick = (e) => { const v = e.target.dataset.v; if (v) { FALLBACK = v; markDirty(); renderGaps(); } };
+
 let openBlock = -1;
 const SHOW_OPTS = [["clock", "Clock", "🕐"], ["L", "L train", "L"], ["B", "B48 bus", "B"], ["both", "Both", "L+B"], ["none", "Nothing", "—"]];
 function renderBlocks() {
+  renderGaps();
   const wrap = $("blocks"); wrap.innerHTML = "";
   BLOCKS.forEach((b, i) => {
     const sm = summary(b), m = toSimple(b), el = document.createElement("div");
@@ -1253,7 +1290,7 @@ function markDirty() { schedDirty = true; $("saveSched").textContent = "Save sch
 
 async function loadSchedule() {
   const d = await api("schedule");
-  BLOCKS = d.blocks.map((b) => ({ ...b, days: [...b.days] }));
+  BLOCKS = d.blocks.map((b) => ({ ...b, days: [...b.days] })); FALLBACK = d.fallback || "clock";
   $("schedNow").textContent = d.now; $("homeNow").textContent = d.now;
   schedDirty = false; $("saveSched").textContent = "Save schedule";
   renderBlocks();
@@ -1261,13 +1298,13 @@ async function loadSchedule() {
 $("addBlock").onclick = () => { BLOCKS.push({ days: [1, 2, 3, 4, 5], from: 8 * 60, to: 10 * 60, mode: "arrivals", L: "MN", B48: "off", Lwhen: "always", Bwhen: "always" }); openBlock = BLOCKS.length - 1; markDirty(); renderBlocks(); };
 $("resetSched").onclick = async () => {
   if (!confirm("Go back to the original schedule?")) return;
-  try { const d = await api("schedule", { reset: true }); BLOCKS = d.blocks; $("schedNow").textContent = d.now; $("homeNow").textContent = d.now; schedDirty = false; $("saveSched").textContent = "Save schedule"; renderBlocks(); toast("Original schedule restored"); }
+  try { const d = await api("schedule", { reset: true }); BLOCKS = d.blocks; FALLBACK = d.fallback || "clock"; $("schedNow").textContent = d.now; $("homeNow").textContent = d.now; schedDirty = false; $("saveSched").textContent = "Save schedule"; renderBlocks(); toast("Original schedule restored"); }
   catch (e) { toast(e.message); }
 };
 $("saveSched").onclick = async () => {
   $("saveSched").disabled = true;
   try {
-    const d = await api("schedule", { blocks: BLOCKS });
+    const d = await api("schedule", { blocks: BLOCKS, fallback: FALLBACK });
     BLOCKS = d.blocks.map((b) => ({ ...b, days: [...b.days] })); $("schedNow").textContent = d.now; $("homeNow").textContent = d.now;
     schedDirty = false; $("saveSched").textContent = "Save schedule"; renderBlocks();
     toast("Schedule saved — the sign updates within a minute");

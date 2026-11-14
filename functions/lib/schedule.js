@@ -9,7 +9,8 @@
 // indicator if they have a service problem.
 // Blocks are checked top to bottom; the first one that matches wins.
 // A block whose "to" is earlier than its "from" wraps past midnight.
-// Outside every block the sign shows the L to Manhattan only.
+// Outside every block the sign shows the chosen "fallback": the clock (default,
+// watching the L for problems), the L to Manhattan, or nothing.
 //
 // Layout follows from what's on: both routes -> two rows ("LB"); one route ->
 // that route full screen ("L" or "B"); nothing -> blank sign ("off").
@@ -33,7 +34,12 @@ const DEFAULT_BLOCKS = [
   { days: [1, 2, 3, 4, 5], from: 19 * 60, to: 24 * 60, L: "MN", B48: "SB" },
   { days: [0, 6], from: 0, to: 24 * 60, L: "MN", B48: "off" },
 ];
-const FALLBACK = { mode: "arrivals", L: "MN", B48: "off", Lwhen: "always", Bwhen: "always" };
+const FALLBACKS = {
+  clock: { mode: "clock", L: "MN", B48: "off", Lwhen: "always", Bwhen: "always" },
+  L: { mode: "arrivals", L: "MN", B48: "off", Lwhen: "always", Bwhen: "always" },
+  none: { mode: "arrivals", L: "off", B48: "off", Lwhen: "always", Bwhen: "always" },
+};
+const FALLBACK_CHOICES = Object.keys(FALLBACKS);
 
 function localTime(date) {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -83,10 +89,11 @@ function validateBlocks(blocks) {
  *            b: null | {stop: string, label: string},
  *            watch: {L: boolean, B48: boolean}}}   routes whose problems should be shown
  */
-function planFor(date, overrides = {}, blocks = DEFAULT_BLOCKS, alerts = {}) {
+function planFor(date, overrides = {}, blocks = DEFAULT_BLOCKS, alerts = {}, fallback = "clock") {
   const { day, hour, minute } = localTime(date);
   const m = hour * 60 + minute;
-  const block = { ...FALLBACK, ...((blocks && blocks.length ? blocks : DEFAULT_BLOCKS).find((b) => inBlock(b, day, m)) || {}) };
+  const match = (blocks && blocks.length ? blocks : DEFAULT_BLOCKS).find((b) => inBlock(b, day, m));
+  const block = { ...FALLBACKS.L, ...(match || FALLBACKS[fallback] || FALLBACKS.clock) };
   const weekend = day === 0 || day === 6;
   const hasIssue = (k) => Boolean(alerts && alerts[k] && alerts[k].level > 0);
 
@@ -117,4 +124,4 @@ function describePlan(p) {
   return parts.length ? parts.join(" + ") : "Nothing (sign is blank)";
 }
 
-module.exports = { planFor, localTime, validateBlocks, describePlan, DEFAULT_BLOCKS, B48_STOP_NB, B48_STOP_SB };
+module.exports = { planFor, localTime, validateBlocks, describePlan, DEFAULT_BLOCKS, FALLBACK_CHOICES, B48_STOP_NB, B48_STOP_SB };
