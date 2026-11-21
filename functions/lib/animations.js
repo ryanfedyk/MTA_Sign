@@ -19,7 +19,7 @@ const { ASSETS, ASSET_PALETTE, catalogText } = require("./assets");
 const IMAGE_W = 64, IMAGE_H = 32;   // optional full-screen image layer (RGB332, 1 byte/pixel)
 
 const LIMITS = {
-  maxW: 48, maxH: 32, maxFrames: 8, maxSprites: 10, maxActors: 12, maxKeys: 24,
+  maxW: 48, maxH: 32, maxFrames: 8, maxSprites: 16, maxActors: 48, maxKeys: 32,
   maxColors: 15, minDuration: 1000, maxDuration: 15000, maxPromptLength: 400,
   maxLibrary: 12, maxDeviceBytes: 20000,
 };
@@ -144,14 +144,15 @@ function normalizeSpec(raw) {
     const keys = (Array.isArray(a?.keyframes) ? a.keyframes : [])
       .map((k) => ({
         t: clampInt(k?.t, 0, duration, 0),
-        x: clampInt(k?.x, -64, 127, 0),
+        x: clampInt(k?.x, -128, 191, 0),
         y: clampInt(k?.y, -40, 71, 0),
         flip: Boolean(k?.flip),
       }))
       .sort((p, q) => p.t - q.t)
       .slice(0, LIMITS.maxKeys);
     if (!keys.length) throw new Error(`actor ${i} has no keyframes`);
-    return { sprite, outline: a.outline !== false, keyframes: keys };
+    const phase = clampInt(a.phase, 0, 60000, 0);
+    return { sprite, outline: a.outline !== false, keyframes: keys, ...(phase ? { phase } : {}) };
   });
 
   return { name, duration_ms: duration, background: image ? "black" : background, palette, sprites, actors, ...(image ? { image } : {}) };
@@ -173,7 +174,7 @@ function toDevice(spec, id, { idle = false } = {}) {
       f: sp.frame_ms,
       fr: sp.frames.map((rows) => rows.map((row) => [...row].map((ch) => (ch === "." ? "." : code[ch])).join("")).join("")),
     })),
-    a: spec.actors.map((a) => ({ s: a.sprite, o: a.outline ? 1 : 0, k: a.keyframes.map((k) => [k.t, k.x, k.y, k.flip ? 1 : 0]) })),
+    a: spec.actors.map((a) => ({ s: a.sprite, o: a.outline ? 1 : 0, ...(a.phase ? { p: a.phase } : {}), k: a.keyframes.map((k) => [k.t, k.x, k.y, k.flip ? 1 : 0]) })),
     ...(spec.image ? { img: spec.image.rgb332 } : {}),
   };
 }
@@ -181,56 +182,65 @@ function toDevice(spec, id, { idle = false } = {}) {
 // ---------------------------------------------------------------------------
 // Gemini
 // ---------------------------------------------------------------------------
-// Example answer shown to Gemini: library sprites + one small hand-drawn prop.
+// Example answer shown to Gemini: library sprites, a little story, secondary motion.
 const EXAMPLE = {
   name: "Cat chases a laser dot",
-  duration_ms: 5200,
+  duration_ms: 6500,
   background: "transit",
-  palette: { r: "#ff2828", R: "#ffb4b4" },
+  palette: {},
   sprites: [
     { asset: "laser" },
     { asset: "cat_run" },
     { asset: "cat_sit" },
+    { asset: "heart" },
   ],
   actors: [
     { sprite: 0, outline: false, keyframes: [
       { t: 0, x: 70, y: 27 }, { t: 600, x: 40, y: 28 }, { t: 1500, x: 8, y: 26 },
       { t: 2300, x: 50, y: 27 }, { t: 3200, x: 66, y: 27 } ] },
     { sprite: 1, outline: true, keyframes: [
-      { t: 700, x: 66, y: 21, flip: true }, { t: 1700, x: 6, y: 21, flip: true },
-      { t: 1701, x: 6, y: 21, flip: false }, { t: 3300, x: 66, y: 21, flip: false } ] },
-    { sprite: 2, outline: true, keyframes: [ { t: 3600, x: 50, y: 20, flip: true }, { t: 5200, x: 50, y: 20, flip: true } ] },
+      { t: 700, x: 66, y: 21, flip: true }, { t: 1200, x: 36, y: 19, flip: true }, { t: 1700, x: 6, y: 21, flip: true },
+      { t: 1701, x: 6, y: 21, flip: false }, { t: 2500, x: 36, y: 19, flip: false }, { t: 3300, x: 50, y: 21, flip: false } ] },
+    { sprite: 2, outline: true, keyframes: [ { t: 3301, x: 50, y: 20, flip: true }, { t: 6500, x: 50, y: 20, flip: true } ] },
+    { sprite: 3, outline: true, phase: 150, keyframes: [ { t: 4000, x: 53, y: 14 }, { t: 5400, x: 55, y: 4 } ] },
+    { sprite: 3, outline: true, keyframes: [ { t: 4600, x: 47, y: 13 }, { t: 6000, x: 45, y: 3 } ] },
   ],
 };
 
 const SYSTEM_PROMPT = `You are a pixel-art animator for a 64x32 RGB LED matrix sign that hangs in a home and shows subway arrival times.
-You turn a short request into a small animation and reply with ONLY a JSON object (no prose, no code fences).
+You turn a short request into a charming little animation and reply with ONLY a JSON object (no prose, no code fences).
 
 Canvas: x 0..63 left to right, y 0..31 top to bottom. Each pixel is one LED, so everything must read at tiny size.
 
 JSON format:
 {
   "name": short title (max 40 chars),
-  "duration_ms": total length, 2000-10000,
+  "duration_ms": total length, 3000-12000,
   "background": "transit" (drawn on top of the live arrival times, like a character passing in front of the sign) or "black" (a full-screen scene),
-  "palette": { single-character key: "#RRGGBB" }, max 15 colors; "." is always transparent and must not be in the palette,
-  "sprites": [ { "name": text, "frame_ms": time per frame 60-400, "frames": [ [row strings...], ...1-8 frames ] } ],
-  "actors": [ { "sprite": index into sprites, "outline": true/false, "keyframes": [ { "t": ms, "x": int, "y": int, "flip": bool }, ... ] } ]
+  "palette": { single-character key: "#RRGGBB" } for sprites you draw yourself (library sprites bring their own colors); "." is transparent and never in the palette,
+  "sprites": [ { "asset": "<library name>" } or { "name": text, "frame_ms": 60-400, "frames": [ [row strings...], ...1-8 frames ] } ],
+  "actors": [ { "sprite": index into sprites, "outline": true/false, "phase": optional ms offset for its frame cycle,
+                "keyframes": [ { "t": ms, "x": int, "y": int, "flip": bool }, ... ] } ]
 }
 
-Rules:
-- Every row of every frame of a sprite has the same length; every frame of a sprite has the same number of rows. Max sprite size 40 wide x 32 tall. Typical characters are 10-20 px wide.
-- Each character in a row is either "." (transparent) or a palette key.
-- PREFER THE SPRITE LIBRARY. Instead of drawing, a sprite can be { "asset": "<name>" } (optionally with "frame_ms"); its frames and colors are filled in automatically and look much better than new drawings. Always use the library for cats. Only draw new sprites for things the library doesn't have (keep them simple: bold shapes, 2-4 colors).
-  Library (all face right; flip to face left):
+THE SPRITE LIBRARY (use it! these are hand-drawn and look far better than anything drawn from scratch). All face right; "flip": true faces left.
 ${catalogText()}
-- x, y is the sprite's top-left corner. Actors move in a straight line between keyframes and are hidden before their first and after their last keyframe. Start/end off-screen (e.g. x = -width or x = 64) for entrances and exits.
-- Sprites face right; set "flip": true to face left.
-- Frames loop while the actor is visible: use 2-4 frames for walking/flapping cycles.
-- Use bright, saturated colors; dark colors look like "off" LEDs. Give characters a clear silhouette and 1-2 px features (eyes, ears) that read at tiny size.
-- "outline": true adds a 1 px dark halo so the actor stays readable over the arrival-time text. Use it for "transit" backgrounds.
-- With "transit", keep the action quick (3-6 s) and prefer the bottom half or a pass across the screen. With "black", you can fill the screen and tell a tiny story; you may add a still sprite (one frame, keyframes at t=0 and t=duration) as scenery.
-- Multiple actors are encouraged for interaction (a cat chasing a mouse, birds flying in formation, rain drops, etc.).
+
+Rules:
+- Use library sprites for every character and object they cover. Only draw a new sprite for something the library lacks: keep it small (at most 16x16), bold, 2-4 colors, every row of every frame the same length.
+- x, y is the sprite's top-left corner. Actors move in a straight line between keyframes and are hidden before their first and after their last keyframe. Enter and exit off-screen (x = -width or x = 64).
+- At most 40 actors, 32 keyframes each, 12 sprites, 15 colors in total.
+- "outline": true adds a 1 px dark halo so a character stays readable over the arrival-time text; use it for characters on "transit". Use false for tiny particles (snow, leaves, sparkles) and for scenery.
+
+Make it feel hand-animated (this matters most):
+- Tell a tiny story in 5-10 s: an entrance, something happening, an ending (an exit or a final pose).
+- Several actors: characters plus secondary motion (falling leaves or snow, sparkles, hearts, zzz, birds). A scene with one actor is too plain.
+- Natural motion: several keyframes per actor -- hops (y up 2-3 px and back), bobbing flight, swaying fall, pausing before turning.
+- To change a character's pose (walk -> sit), end one actor and start another with the new sprite 1 ms later at the same spot.
+- For many copies of a small sprite (snow, leaves, stars), give each a different "phase", start time, speed and sway so they don't move in lockstep.
+- Ground level: a sprite of height h stands on the bottom at y = 32 - h.
+- With "transit", keep characters mostly in the bottom half or passing through quickly so the times stay readable.
+- With "black", fill the stage: scenery (trees, a snowman, the moon, stars) as still actors with keyframes at t = 0 and t = duration_ms, then the action in front.
 
 Example of a good answer for "a cat chases a laser dot":
 ${JSON.stringify(EXAMPLE)}`;
@@ -264,7 +274,7 @@ async function callGemini(opts) {
 // repeating sprite rows ("......") keeps writing for minutes.
 const MAX_OUTPUT_TOKENS = 12000;
 
-async function callGeminiOnce({ apiKey, model, contents, fetchImpl = fetch, timeoutMs = 100000, deadline = Infinity,
+async function callGeminiOnce({ apiKey, model, contents, fetchImpl = fetch, timeoutMs = 75000, deadline = Infinity,
   lowThinking = true, onAttempt = () => {} }) {
   const ctl = new AbortController();
   const limit = Math.max(5000, Math.min(timeoutMs, deadline - Date.now()));
@@ -324,7 +334,8 @@ async function callGeminiOnce({ apiKey, model, contents, fetchImpl = fetch, time
 }
 
 // Tried in order when the chosen model is overloaded or too slow.
-const FALLBACK_MODELS = ["gemini-3.6-flash"];
+const DEFAULT_MODEL = "gemini-3.6-flash";
+const FALLBACK_MODELS = ["gemini-3.8-flash"];
 const TOTAL_BUDGET_MS = 270000;   // the app function times out at 300 s
 
 /**
@@ -332,7 +343,8 @@ const TOTAL_BUDGET_MS = 270000;   // the app function times out at 300 s
  * fall back to another Gemini model before giving up.
  */
 async function generateAnimation(prompt, opts = {}) {
-  const models = [opts.model || "gemini-3.8-flash", ...FALLBACK_MODELS.filter((m) => m !== opts.model)];
+  const first = opts.model || DEFAULT_MODEL;
+  const models = [first, ...FALLBACK_MODELS.filter((m) => m !== first)];
   const deadline = Date.now() + (opts.budgetMs ?? TOTAL_BUDGET_MS);
   for (let i = 0; ; i++) {
     try {
@@ -366,4 +378,4 @@ async function generateWith(prompt, { apiKey, model, fetchImpl = fetch, retryWai
   throw new Error(`Gemini's animation wasn't usable (${lastErr ? lastErr.message : "ran out of time"}). Try rephrasing.`);
 }
 
-module.exports = { LIMITS, IMAGE_W, IMAGE_H, normalizeSpec, expandAssets, toDevice, generateAnimation, extractJson, SYSTEM_PROMPT, EXAMPLE };
+module.exports = { DEFAULT_MODEL, LIMITS, IMAGE_W, IMAGE_H, normalizeSpec, expandAssets, toDevice, generateAnimation, extractJson, SYSTEM_PROMPT, EXAMPLE };

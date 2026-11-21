@@ -60,7 +60,7 @@ bool drawCloudAnim(Adafruit_GFX& g, const CloudAnim& a, uint32_t ms) {
       y = k0.y + (int)lroundf((k1.y - k0.y) * f);
       flip = k0.flip;
     }
-    const auto& frame = sp.frames[(ms / (sp.frameMs ? sp.frameMs : 150)) % sp.frames.size()];
+    const auto& frame = sp.frames[((ms + act.phase) / (sp.frameMs ? sp.frameMs : 150)) % sp.frames.size()];
     drawCloudSprite(g, a, sp, frame, x, y, flip, act.outline);
   }
   return true;

@@ -122,9 +122,9 @@ jobs:
         run: |
           if [ -z "$GEMINI_API_KEY" ]; then echo "GEMINI_API_KEY secret is not set"; exit 0; fi
           echo "configured model: ${GEMINI_MODEL:-default}"
-          for p in "a small cat walks across the bottom of the sign" "snow falls while a snowman waves"; do
+          export PRINT_SPEC=1
+          for p in "a small cat walks across the bottom of the sign" "snow falls while a snowman waves" \
+                   "a turkey struts across and gobbles" "two cats play with a ball of yarn" "a rocket ship blasts off into space"; do
             echo "== $p"
             node tools/gemini-probe.js "$p"
           done
-          echo "== fallback model only"
-          node tools/gemini-probe.js "a bird flies over a sleeping cat" gemini-3.6-flash

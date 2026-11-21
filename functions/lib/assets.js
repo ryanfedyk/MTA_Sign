@@ -130,6 +130,54 @@ const ASSETS = {
   },
 };
 
+// ---- holiday sprites (drawn in art.js with their own palettes) ----
+// Their colors are merged into ASSET_PALETTE: a color that's already there is
+// reused, anything new gets a spare character.
+const art = require("./art");
+const SPARE = [..."ACEFHIJKLMNOPQSTUVXYZacfhijlmnqstuvxz0123456789"];
+function adopt(frames, pal) {
+  const map = {};
+  for (const c of new Set(frames.flat().join(""))) {
+    if (c === ".") continue;
+    const hex = pal[c].toLowerCase();
+    const near = (k) => {   // a color you can't tell apart on an LED counts as the same
+      const a = parseInt(ASSET_PALETTE[k].slice(1), 16), b = parseInt(hex.slice(1), 16);
+      return Math.hypot((a >> 16) - (b >> 16), ((a >> 8) & 255) - ((b >> 8) & 255), (a & 255) - (b & 255)) < 36;
+    };
+    let key = Object.keys(ASSET_PALETTE).find(near);
+    if (!key) {
+      key = SPARE.find((k) => !(k in ASSET_PALETTE));
+      ASSET_PALETTE[key] = hex;
+    }
+    map[c] = key;
+  }
+  return art.recolor(frames, map);
+}
+const A = art.AUTUMN, X = { ...art.XMAS, n: "#a0602a" };
+const HOLIDAY = {
+  autumn_tree: ["Autumn tree", 1000, [art.autumnTree(3)], A,
+    "24x32 tree with red/orange/gold leaves, trunk on its left. Scenery: x = -5, y = 0 for the left edge; flip at x = 45 for the right edge."],
+  leaf_red: ["Red leaf", 140, art.recolor(art.LEAF, { x: "r" }), A, "3x3 tumbling leaf (4 frames). Use many, with different phase values, falling or swirling in a gust."],
+  leaf_orange: ["Orange leaf", 140, art.recolor(art.LEAF, { x: "o" }), A, "3x3 tumbling leaf (4 frames)."],
+  leaf_gold: ["Gold leaf", 140, art.recolor(art.LEAF, { x: "y" }), A, "3x3 tumbling leaf (4 frames)."],
+  wind_gust: ["Gust of wind", 160, art.GUST, A, "18x3 wind streak. Sweep it across quickly (about 1.3 s for the full width)."],
+  turkey: ["Turkey", 220, art.TURKEY_WALK, A, "16x14 turkey strutting (2 frames). y = 18 for the bottom."],
+  turkey_fan: ["Turkey, tail fanned", 260, art.TURKEY_FAN, A, "20x16 turkey facing you with its tail fanned out (gobbling). Swap in when a walking turkey stops."],
+  xmas_tree: ["Christmas tree", 600, art.xmasTree(1), X, "15x26 tree with blinking lights and a star. Scenery: y = 4 stands it on the bottom."],
+  snowflake: ["Snowflake", 500, art.FLAKE, X, "3x3 twinkling snowflake. Use many falling slowly with a sway and different phase values."],
+  present: ["Present", 1000, [["ryrr", "yyyy", "ryrr", "ryrr"]], X, "4x4 wrapped gift."],
+  santa_sleigh: ["Santa's sleigh", 1000, art.SANTA, X, "20x10 Santa in his sleigh, facing right. Put reindeer in front of it (to the right) moving with it."],
+  reindeer: ["Flying reindeer", 160, art.recolor(art.REINDEER, { x: "N" }), X, "13x10 reindeer galloping through the air (2 frames). Space them about 15 px apart in front of the sleigh."],
+  rudolph_fly: ["Rudolph flying", 200, art.RUDOLPH_FLY, X, "16x14 Rudolph leaping through the air, red nose glowing (2 frames)."],
+  rudolph_walk: ["Rudolph walking", 180, art.RUDOLPH_WALK, X, "16x14 Rudolph walking, nose blinking (4 frames). y = 17 for the bottom."],
+  elf: ["Elf", 200, art.ELF, X, "7x13 elf walking (2 frames). y = 19 for the bottom."],
+  elf_present: ["Elf with a present", 200, art.ELF_CARRY, X, "11x13 elf carrying a present (2 frames). y = 19 for the bottom."],
+  snowman: ["Snowman", 1000, [art.SNOWMAN], X, "17x24 snowman with hat, scarf and carrot nose. y = 7 stands it on the bottom."],
+};
+for (const [id, [label, frame_ms, frames, pal, notes]] of Object.entries(HOLIDAY)) {
+  ASSETS[id] = { label, frame_ms, notes, frames: adopt(frames, pal) };
+}
+
 /** Short catalog text for Gemini's instructions. */
 function catalogText() {
   return Object.entries(ASSETS).map(([id, a]) => {

@@ -21,6 +21,7 @@ struct CloudKey { uint16_t t; int16_t x, y; bool flip; };
 struct CloudActor {
   uint8_t sprite = 0;
   bool outline = true;
+  uint16_t phase = 0;                          // ms added to the frame clock, so copies of a sprite animate out of step
   std::vector<CloudKey> keys;                  // sorted by t
 };
 

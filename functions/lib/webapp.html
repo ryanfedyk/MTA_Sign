@@ -787,7 +787,7 @@ function renderSpec(spec, ms) {
       const k0 = ks[i], k1 = ks[i + 1], f = k1.t > k0.t ? (ms - k0.t) / (k1.t - k0.t) : 0;
       x = k0.x + Math.round((k1.x - k0.x) * f); y = k0.y + Math.round((k1.y - k0.y) * f); flip = k0.flip;
     }
-    const rows = sp.frames[Math.floor(ms / (sp.frame_ms || 150)) % sp.frames.length];
+    const rows = sp.frames[Math.floor((ms + (a.phase || 0)) / (sp.frame_ms || 150)) % sp.frames.length];
     const w = rows[0].length;
     const X = (c) => (flip ? x + (w - 1 - c) : x + c);
     if (a.outline) rows.forEach((row, r) => [...row].forEach((ch, c) => {

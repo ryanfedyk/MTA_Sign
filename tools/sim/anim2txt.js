@@ -12,7 +12,7 @@ for (const s of d.s) {
   for (const f of s.fr) out.push(`F ${f}`);
 }
 for (const a of d.a) {
-  out.push(`A ${a.s} ${a.o} ${a.k.length}`);
+  out.push(`A ${a.s} ${a.o} ${a.k.length} ${a.p || 0}`);
   for (const k of a.k) out.push(`K ${k.join(" ")}`);
 }
 if (d.img) out.push(`I ${d.img}`);

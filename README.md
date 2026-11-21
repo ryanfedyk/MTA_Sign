@@ -130,7 +130,7 @@ The repo is public, so passwords and keys are stored as **GitHub secrets**
 | `GEMINI_API_KEY` | *(Optional)* A Google AI Studio key, which enables "Create with Gemini". Get one at https://aistudio.google.com/apikey |
 
 To use a different Gemini model, add a repository **variable** (not a secret) named
-`GEMINI_MODEL`, e.g. `gemini-3.8-flash`, which is the default.
+`GEMINI_MODEL`, e.g. `gemini-3.8-flash`. The default is `gemini-3.6-flash`, which has been the fastest and most reliable; if it is busy or slow the cloud tries `gemini-3.8-flash`.
 
 **Cloud Shell setup script.** This creates the account GitHub uses to deploy, and the
 settings database. It's safe to run again. Open https://shell.cloud.google.com, signed

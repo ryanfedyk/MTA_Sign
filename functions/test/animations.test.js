@@ -56,7 +56,7 @@ test("normalizeSpec repairs ragged rows, unknown colors and out-of-range numbers
   assert.strictEqual(s.sprites[0].frame_ms, 40);
   assert.strictEqual(s.actors[0].sprite, 0);
   assert.deepStrictEqual(s.actors[0].keyframes.map((k) => k.t), [0, 5000]);
-  assert.strictEqual(s.actors[0].keyframes[1].x, 127);
+  assert.strictEqual(s.actors[0].keyframes[1].x, 191);
   assert.strictEqual(s.actors[0].keyframes[0].flip, true);
 });
 
@@ -69,7 +69,7 @@ test("device format uses palette indexes and stays compact", () => {
   const s = anim.normalizeSpec(anim.EXAMPLE);
   const d = anim.toDevice(s, "abc", { idle: true });
   assert.strictEqual(d.p.length, Object.keys(s.palette).length);
-  assert.strictEqual(d.p[0], "ff2828");
+  assert.ok(d.p.includes("ff2828"));
   assert.strictEqual(d.s[1].fr[0].length, 16 * 11);
   assert.match(d.s[1].fr[0], /^[.0-9a-e]+$/);
   assert.deepStrictEqual(d.a[0].k[1], [600, 40, 28, 0]);
@@ -195,10 +195,46 @@ test("if the main model stays busy, a fallback Gemini model is used", async () =
   const urls = [];
   const fetchImpl = async (url) => {
     urls.push(url);
-    if (url.includes("gemini-3.8-flash")) return { ok: false, status: 503, json: async () => ({ error: { message: "high demand" } }) };
+    if (url.includes(anim.DEFAULT_MODEL)) return { ok: false, status: 503, json: async () => ({ error: { message: "high demand" } }) };
     return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(anim.EXAMPLE) }] } }] }) };
   };
   const spec = await anim.generateAnimation("cat", { apiKey: "k", fetchImpl, retryWaits: [1] });
   assert.ok(spec.actors.length);
-  assert.ok(urls.some((u) => u.includes("gemini-3.6-flash")));
+  assert.ok(urls.some((u) => u.includes("gemini-3.8-flash")));
+});
+
+test("a model that hangs is abandoned for the fallback model", async () => {
+  const urls = [];
+  const fetchImpl = (url, opts) => {
+    urls.push(url);
+    if (url.includes(anim.DEFAULT_MODEL)) {
+      return new Promise((_, reject) => opts.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" }))));
+    }
+    return Promise.resolve({ ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(anim.EXAMPLE) }] } }] }) });
+  };
+  const attempts = [];
+  const spec = await anim.generateAnimation("cat", { apiKey: "k", fetchImpl, timeoutMs: 50, budgetMs: 120000, onAttempt: (a) => attempts.push(a) });
+  assert.ok(spec.actors.length);
+  assert.ok(attempts[0].timeout);
+  assert.ok(urls.at(-1).includes("gemini-3.8-flash"));
+});
+
+test("an answer cut off at the length cap is retried with feedback", async () => {
+  const bodies = [];
+  const fetchImpl = async (url, opts) => {
+    bodies.push(JSON.parse(opts.body));
+    const first = bodies.length === 1;
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ finishReason: first ? "MAX_TOKENS" : "STOP",
+      content: { parts: [{ text: first ? '{"name":"x","sprites":[{"frames":[["......' : JSON.stringify(anim.EXAMPLE) }] } }] }) };
+  };
+  const spec = await anim.generateAnimation("cat", { apiKey: "k", fetchImpl });
+  assert.strictEqual(spec.name, anim.EXAMPLE.name);
+  assert.ok(bodies[0].generationConfig.maxOutputTokens > 0);
+  assert.match(bodies[1].contents.at(-1).parts[0].text, /cut off/);
+});
+
+test("the example Gemini is shown is itself valid and uses the library", () => {
+  const spec = anim.normalizeSpec(anim.EXAMPLE);
+  assert.ok(spec.actors.length >= 4);
+  assert.ok(spec.actors.some((a) => a.phase));
 });
