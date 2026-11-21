@@ -45,6 +45,7 @@ function scene({ name, duration, background = "black", sprites, actors }, PAL) {
     actors: actors.map((a) => ({
       sprite: keys.indexOf(a.sprite), outline: Boolean(a.outline), keyframes: a.keyframes,
       ...(a.phase ? { phase: Math.round(a.phase) } : {}),
+      ...(a.sway ? { sway: a.sway } : {}),
     })),
   };
   for (const a of actors) if (!keys.includes(a.sprite)) throw new Error(`${name}: unknown sprite ${a.sprite}`);
@@ -54,23 +55,28 @@ function scene({ name, duration, background = "black", sprites, actors }, PAL) {
 const leafSprites = () => Object.fromEntries(["r", "o", "y", "R", "n"].map((c) => [`leaf_${c}`, { frame_ms: 140, frames: recolor(LEAF, { x: c }) }]));
 
 // ---- motion ----
+// Motion uses the sign's built-in sway (a sine wobble on top of a straight
+// path), so a falling leaf needs 2 keyframes instead of 20 -- the sign holds
+// hundreds of these in memory. Copies get different "phase" values so they
+// don't wobble in step.
+
 /** A leaf drifting down with a side-to-side sway. */
 function fallingLeaf(r, { x0, y0, y1, t0, t1, sway = 3 }) {
-  const period = range(r, 0.35, 0.6), ph = r() * 6.28, drift = range(r, -6, 6);
-  return path(t0, t1, (u) => ({
-    x: x0 + drift * u + sway * Math.sin(ph + u / period * 3.14),
-    y: y0 + (y1 - y0) * u,
-  }), Math.min(24, Math.max(6, Math.round((t1 - t0) / 220))));
+  const drift = Math.round(range(r, -6, 6));
+  return {
+    keyframes: [{ t: t0, x: x0, y: y0 }, { t: t1, x: x0 + drift, y: y1 }],
+    sway: { x: sway, y: 0, ms: irange(r, 1300, 2100) },
+  };
 }
 
 /** A leaf caught in a gust: races across, looping. dir = 1 (to the right) or -1. */
 function gustLeaf(r, { y0, t0, t1, dir = 1, loops = 1.5, radius = 4 }) {
-  const ph = r() * 6.28, rad = range(r, radius * 0.6, radius * 1.2), rise = range(r, -6, 4);
+  const rad = Math.max(2, Math.round(range(r, radius * 0.6, radius * 1.2))), rise = Math.round(range(r, -6, 4));
   const xa = dir > 0 ? -6 : 68, xb = dir > 0 ? 68 : -6;
-  return path(t0, t1, (u) => ({
-    x: xa + (xb - xa) * u + rad * Math.sin(ph + u * loops * 6.28),
-    y: y0 + rise * u + rad * Math.cos(ph + u * loops * 6.28),
-  }), Math.min(30, Math.round(8 + loops * 8)));
+  return {
+    keyframes: [{ t: t0, x: xa, y: y0 }, { t: t1, x: xb, y: y0 + rise }],
+    sway: { x: rad, y: rad, ms: Math.max(300, Math.round((t1 - t0) / loops)) },
+  };
 }
 
 const LEAF_KEYS = ["leaf_r", "leaf_o", "leaf_y", "leaf_R", "leaf_n"];
@@ -89,8 +95,8 @@ function autumnGust() {
   // a few leaves drift down before the wind
   for (let i = 0; i < 6; i++) {
     const left = i % 2 === 0, t0 = 200 + i * 600;
-    actors.push({ sprite: pick(r, LEAF_KEYS), phase: r() * 600,
-      keyframes: fallingLeaf(r, { x0: left ? irange(r, 8, 18) : irange(r, 44, 54), y0: irange(r, 6, 14), y1: 29, t0, t1: t0 + irange(r, 3200, 4200) }) });
+    actors.push({ sprite: pick(r, LEAF_KEYS), phase: r() * 2400,
+      ...fallingLeaf(r, { x0: left ? irange(r, 8, 18) : irange(r, 44, 54), y0: irange(r, 6, 14), y1: 29, t0, t1: t0 + irange(r, 3200, 4200) }) });
   }
   // the gust: streaks, then leaves torn off and carried across in loops
   for (let i = 0; i < 4; i++) {
@@ -99,14 +105,14 @@ function autumnGust() {
   }
   for (let i = 0; i < 22; i++) {
     const t0 = gustStart + i * 140;
-    actors.push({ sprite: pick(r, LEAF_KEYS), phase: r() * 600,
-      keyframes: gustLeaf(r, { y0: irange(r, 4, 22), t0, t1: t0 + irange(r, 1900, 2600), loops: range(r, 1, 2), radius: 5 }) });
+    actors.push({ sprite: pick(r, LEAF_KEYS), phase: r() * 2400,
+      ...gustLeaf(r, { y0: irange(r, 4, 22), t0, t1: t0 + irange(r, 1900, 2600), loops: range(r, 1, 2), radius: 5 }) });
   }
   // stragglers settle afterwards
   for (let i = 0; i < 4; i++) {
     const t0 = gustEnd + i * 450;
-    actors.push({ sprite: pick(r, LEAF_KEYS), phase: r() * 600,
-      keyframes: fallingLeaf(r, { x0: irange(r, 14, 48), y0: -3, y1: 29, t0, t1: Math.min(D, t0 + 2600) }) });
+    actors.push({ sprite: pick(r, LEAF_KEYS), phase: r() * 2400,
+      ...fallingLeaf(r, { x0: irange(r, 14, 48), y0: -3, y1: 29, t0, t1: Math.min(D, t0 + 2600) }) });
   }
   return scene({ name: "Autumn gust", duration: D, sprites: {
     treeL: L, treeLw: Lw, treeR: Rt, treeRw: Rw, ...leafSprites(), gust: { frame_ms: 160, frames: GUST },
@@ -118,8 +124,8 @@ function fallingLeaves() {
   const r = rng(21), D = 8000, actors = [];
   for (let i = 0; i < 18; i++) {
     const t0 = Math.round(i * 330 + r() * 200), dur = irange(r, 3600, 5000);
-    actors.push({ sprite: pick(r, LEAF_KEYS), phase: r() * 600,
-      keyframes: fallingLeaf(r, { x0: irange(r, 2, 60), y0: -3, y1: 33, t0, t1: Math.min(D, t0 + dur), sway: 4 }) });
+    actors.push({ sprite: pick(r, LEAF_KEYS), phase: r() * 2400,
+      ...fallingLeaf(r, { x0: irange(r, 2, 60), y0: -3, y1: 33, t0, t1: Math.min(D, t0 + dur), sway: 4 }) });
   }
   return scene({ name: "Falling leaves", duration: D, background: "transit", sprites: leafSprites(), actors }, AUTUMN);
 }
@@ -132,8 +138,8 @@ function leafGust() {
   }
   for (let i = 0; i < 18; i++) {
     const t0 = 300 + i * 150;
-    actors.push({ sprite: pick(r, LEAF_KEYS), phase: r() * 600,
-      keyframes: gustLeaf(r, { y0: irange(r, 3, 26), t0, t1: Math.min(D, t0 + irange(r, 1700, 2300)), loops: range(r, 0.8, 1.8), radius: 4 }) });
+    actors.push({ sprite: pick(r, LEAF_KEYS), phase: r() * 2400,
+      ...gustLeaf(r, { y0: irange(r, 3, 26), t0, t1: Math.min(D, t0 + irange(r, 1700, 2300)), loops: range(r, 0.8, 1.8), radius: 4 }) });
   }
   return scene({ name: "Leaf gust", duration: D, background: "transit",
     sprites: { gust: { frame_ms: 160, frames: GUST }, ...leafSprites() }, actors }, AUTUMN);
@@ -159,8 +165,8 @@ function turkeyGrove() {
   actors.push({ sprite: "walk", keyframes: [{ t: 6201, x: 24, y: 17 }, { t: D, x: 66, y: 17 }] });
   for (let i = 0; i < 10; i++) {
     const left = r() < 0.5, t0 = Math.round(i * 900 + r() * 400);
-    actors.push({ sprite: pick(r, LEAF_KEYS), phase: r() * 600,
-      keyframes: fallingLeaf(r, { x0: left ? irange(r, 6, 16) : irange(r, 46, 56), y0: irange(r, 6, 14), y1: 29, t0, t1: Math.min(D, t0 + irange(r, 3000, 4000)) }) });
+    actors.push({ sprite: pick(r, LEAF_KEYS), phase: r() * 2400,
+      ...fallingLeaf(r, { x0: left ? irange(r, 6, 16) : irange(r, 46, 56), y0: irange(r, 6, 14), y1: 29, t0, t1: Math.min(D, t0 + irange(r, 3000, 4000)) }) });
   }
   return scene({ name: "Turkey grove", duration: D, sprites: {
     treeL: { frame_ms: 400, frames: [autumnTree(5)] }, treeR: { frame_ms: 400, frames: mirror([autumnTree(13)]) },
@@ -174,10 +180,11 @@ function snowfall(r, n, { D, big = 0.35, y1 = 33, every }) {
   const out = [];
   for (let i = 0; i < n; i++) {
     const t0 = Math.round(every ? i * every + r() * every : r() * D * 0.6);
-    const dur = irange(r, 4500, 7000), x0 = irange(r, 0, 62), sway = range(r, 1, 2.5), ph = r() * 6.28;
+    const dur = irange(r, 4500, 7000), x0 = irange(r, 0, 62);
     const t1 = Math.min(D, t0 + dur), frac = (t1 - t0) / dur;
-    out.push({ sprite: r() < big ? "flake" : "dot", phase: r() * 800,
-      keyframes: path(t0, t1, (u) => ({ x: x0 + sway * Math.sin(ph + u * 9), y: -3 + (y1 + 3) * u * frac }), 12) });
+    out.push({ sprite: r() < big ? "flake" : "dot", phase: r() * 3000,
+      keyframes: [{ t: t0, x: x0, y: -3 }, { t: t1, x: x0, y: Math.round(-3 + (y1 + 3) * frac) }],
+      sway: { x: irange(r, 1, 2), y: 0, ms: irange(r, 1800, 3000) } });
   }
   return out;
 }
@@ -207,14 +214,11 @@ function snowfallOverlay() {
 
 /** Santa's sleigh with three reindeer, Rudolph in front. */
 function sleighTeam(r, { t0, t1, y, bob = 2, dir = 1, outline = false }) {
-  const actors = [];
   const xs = dir > 0 ? [-80, 68] : [68, -80];
-  const at = (dx, ph) => path(t0, t1, (u) => ({ x: xs[0] + (xs[1] - xs[0]) * u + dx, y: y + bob * Math.sin(u * 12 + ph) }), 26);
-  actors.push({ sprite: "sleigh", outline, keyframes: at(0, 0) });
-  actors.push({ sprite: "deer", outline, phase: 0, keyframes: at(22, -0.6) });
-  actors.push({ sprite: "deer", outline, phase: 150, keyframes: at(37, -1.2) });
-  actors.push({ sprite: "rudolph", outline, phase: 75, keyframes: at(52, -1.8) });
-  return actors;
+  // the team bobs in a ripple: each reindeer a little ahead of the one behind
+  const member = (sprite, dx, phase) => ({ sprite, outline, phase,
+    keyframes: [{ t: t0, x: xs[0] + dx, y }, { t: t1, x: xs[1] + dx, y }], sway: { x: 0, y: bob, ms: 1600 } });
+  return [member("sleigh", 0, 0), member("deer", 22, 1400), member("deer", 37, 1200), member("rudolph", 52, 1000)];
 }
 
 const deerSprites = () => ({
@@ -264,13 +268,14 @@ function rudolphWalk() {
 function rudolphFlies() {
   const r = rng(91), D = 7000;
   const sky = NIGHT_SKY(9, 16, D);
-  const fly = path(0, D, (u) => ({ x: -18 + 86 * u, y: 15 - 11 * Math.sin(u * 3.14) + 1.5 * Math.sin(u * 20) }), 28);
+  const fly = path(0, D, (u) => ({ x: -18 + 86 * u, y: 15 - 11 * Math.sin(u * 3.14) }), 28);
   const actors = [...sky];
   for (let i = 0; i < 11; i++) {   // sparkles left behind
     const k = fly[Math.min(fly.length - 1, 4 + i * 2)];
     actors.push({ sprite: "star", phase: i * 130, keyframes: [{ t: k.t, x: k.x + 2, y: k.y + 9 }, { t: k.t + 1000, x: k.x, y: k.y + 12 }] });
   }
-  actors.push({ sprite: "rudolph", keyframes: fly });
+  actors.push({ sprite: "rudolph", keyframes: path(0, D, (u) => ({ x: -18 + 86 * u, y: 15 - 11 * Math.sin(u * 3.14) }), 10),
+    sway: { x: 0, y: 2, ms: 1100 } });
   return scene({ name: "Rudolph flies", duration: D, sprites: {
     rudolph: { frame_ms: 200, frames: RUDOLPH_FLY },
     star: { frame_ms: 300, frames: STAR }, twinkle: { frame_ms: 250, frames: TWINKLE },

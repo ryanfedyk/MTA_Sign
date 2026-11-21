@@ -22,6 +22,8 @@ struct CloudActor {
   uint8_t sprite = 0;
   bool outline = true;
   uint16_t phase = 0;                          // ms added to the frame clock, so copies of a sprite animate out of step
+  int8_t swayX = 0, swayY = 0;                 // built-in wobble on top of the path: x += swayX*sin, y += swayY*cos
+  uint16_t swayMs = 0;                         // ...one full cycle every swayMs (0 = no sway)
   std::vector<CloudKey> keys;                  // sorted by t
 };
 

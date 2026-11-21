@@ -48,7 +48,7 @@ static bool loadCloud(const char* file, CloudAnim& a) {
       uint32_t acc = 0; int bits = 0;
       for (char c : b64) { size_t v = tbl.find(c); if (v == std::string::npos) continue; acc = (acc << 6) | v; bits += 6;
         if (bits >= 8) { bits -= 8; a.image.push_back((acc >> bits) & 0xFF); } }
-    } else if (tag == "A") { CloudActor ac; int s2, o, n; int ph; in >> s2 >> o >> n >> ph; ac.sprite = s2; ac.outline = o; ac.phase = ph;
+    } else if (tag == "A") { CloudActor ac; int s2, o, n; int ph, sx, sy, sms; in >> s2 >> o >> n >> ph >> sx >> sy >> sms; ac.sprite = s2; ac.outline = o; ac.phase = ph; ac.swayX = sx; ac.swayY = sy; ac.swayMs = sms;
       for (int i = 0; i < n; i++) { std::string t; int kt, kx, ky, kf; in >> t >> kt >> kx >> ky >> kf; ac.keys.push_back({(uint16_t)kt, (int16_t)kx, (int16_t)ky, kf != 0}); }
       a.actors.push_back(ac);
     }

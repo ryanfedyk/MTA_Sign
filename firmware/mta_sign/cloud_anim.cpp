@@ -60,6 +60,11 @@ bool drawCloudAnim(Adafruit_GFX& g, const CloudAnim& a, uint32_t ms) {
       y = k0.y + (int)lroundf((k1.y - k0.y) * f);
       flip = k0.flip;
     }
+    if (act.swayMs) {   // falling leaves, snow, bobbing flight, loop-the-loops
+      float a = 6.2831853f * float((ms + act.phase) % act.swayMs) / float(act.swayMs);
+      x += (int)lroundf(act.swayX * sinf(a));
+      y += (int)lroundf(act.swayY * cosf(a));
+    }
     const auto& frame = sp.frames[((ms + act.phase) / (sp.frameMs ? sp.frameMs : 150)) % sp.frames.size()];
     drawCloudSprite(g, a, sp, frame, x, y, flip, act.outline);
   }

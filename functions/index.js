@@ -113,7 +113,7 @@ function libraryItems(cfg, list) {
 
 // Newer firmware (?page=N) downloads the library a page at a time, so the whole
 // thing never has to fit in the sign's memory as one JSON document.
-const PAGE_BYTES = 12000;
+const PAGE_BYTES = 8000;
 const TOTAL_BYTES = 160000;
 async function deviceLibrary(page = null) {
   const s = getStore();

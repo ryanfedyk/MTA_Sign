@@ -152,7 +152,12 @@ function normalizeSpec(raw) {
       .slice(0, LIMITS.maxKeys);
     if (!keys.length) throw new Error(`actor ${i} has no keyframes`);
     const phase = clampInt(a.phase, 0, 60000, 0);
-    return { sprite, outline: a.outline !== false, keyframes: keys, ...(phase ? { phase } : {}) };
+    let sway = null;
+    if (a.sway && typeof a.sway === "object") {
+      const sx = clampInt(a.sway.x, -30, 30, 0), sy = clampInt(a.sway.y, -30, 30, 0), sms = clampInt(a.sway.ms, 200, 20000, 1000);
+      if (sx || sy) sway = { x: sx, y: sy, ms: sms };
+    }
+    return { sprite, outline: a.outline !== false, keyframes: keys, ...(phase ? { phase } : {}), ...(sway ? { sway } : {}) };
   });
 
   return { name, duration_ms: duration, background: image ? "black" : background, palette, sprites, actors, ...(image ? { image } : {}) };
@@ -174,7 +179,7 @@ function toDevice(spec, id, { idle = false } = {}) {
       f: sp.frame_ms,
       fr: sp.frames.map((rows) => rows.map((row) => [...row].map((ch) => (ch === "." ? "." : code[ch])).join("")).join("")),
     })),
-    a: spec.actors.map((a) => ({ s: a.sprite, o: a.outline ? 1 : 0, ...(a.phase ? { p: a.phase } : {}), k: a.keyframes.map((k) => [k.t, k.x, k.y, k.flip ? 1 : 0]) })),
+    a: spec.actors.map((a) => ({ s: a.sprite, o: a.outline ? 1 : 0, ...(a.phase ? { p: a.phase } : {}), ...(a.sway ? { w: [a.sway.x, a.sway.y, a.sway.ms] } : {}), k: a.keyframes.map((k) => [k.t, k.x, k.y, k.flip ? 1 : 0]) })),
     ...(spec.image ? { img: spec.image.rgb332 } : {}),
   };
 }
@@ -219,7 +224,8 @@ JSON format:
   "background": "transit" (drawn on top of the live arrival times, like a character passing in front of the sign) or "black" (a full-screen scene),
   "palette": { single-character key: "#RRGGBB" } for sprites you draw yourself (library sprites bring their own colors); "." is transparent and never in the palette,
   "sprites": [ { "asset": "<library name>" } or { "name": text, "frame_ms": 60-400, "frames": [ [row strings...], ...1-8 frames ] } ],
-  "actors": [ { "sprite": index into sprites, "outline": true/false, "phase": optional ms offset for its frame cycle,
+  "actors": [ { "sprite": index into sprites, "outline": true/false, "phase": optional ms offset for its frame cycle and sway,
+                "sway": optional built-in wobble on top of the path { "x": px, "y": px, "ms": one cycle },
                 "keyframes": [ { "t": ms, "x": int, "y": int, "flip": bool }, ... ] } ]
 }
 
@@ -235,7 +241,8 @@ Rules:
 Make it feel hand-animated (this matters most):
 - Tell a tiny story in 5-10 s: an entrance, something happening, an ending (an exit or a final pose).
 - Several actors: characters plus secondary motion (falling leaves or snow, sparkles, hearts, zzz, birds). A scene with one actor is too plain.
-- Natural motion: several keyframes per actor -- hops (y up 2-3 px and back), bobbing flight, swaying fall, pausing before turning.
+- Natural motion: several keyframes per actor -- hops (y up 2-3 px and back), pausing before turning.
+- "sway" adds smooth wobble so two keyframes are enough: a falling leaf {"x":3,"y":0,"ms":1600}, drifting snow {"x":1,"y":0,"ms":2400}, bobbing flight {"x":0,"y":2,"ms":1200}, a loop-the-loop in the wind {"x":4,"y":4,"ms":700}.
 - To change a character's pose (walk -> sit), end one actor and start another with the new sprite 1 ms later at the same spot.
 - For many copies of a small sprite (snow, leaves, stars), give each a different "phase", start time, speed and sway so they don't move in lockstep.
 - Ground level: a sprite of height h stands on the bottom at y = 32 - h.

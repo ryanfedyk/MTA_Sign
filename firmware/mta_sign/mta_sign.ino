@@ -255,6 +255,9 @@ static CloudAnimPtr parseCloudAnim(JsonObjectConst o) {
     act.sprite = ao["s"] | 0;
     act.outline = (ao["o"] | 1) == 1;
     act.phase = ao["p"] | 0;
+    if (ao["w"].is<JsonArrayConst>()) {
+      act.swayX = ao["w"][0] | 0; act.swayY = ao["w"][1] | 0; act.swayMs = ao["w"][2] | 0;
+    }
     for (JsonArrayConst k : ao["k"].as<JsonArrayConst>()) {
       act.keys.push_back({(uint16_t)(k[0] | 0), (int16_t)(k[1] | 0), (int16_t)(k[2] | 0), (k[3] | 0) == 1});
     }

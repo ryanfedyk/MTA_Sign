@@ -266,3 +266,15 @@ test("a wrong API key fails right away instead of retrying", async () => {
   await assert.rejects(anim.generateAnimation("cat", { apiKey: "bad", fetchImpl }), /API key not valid/);
   assert.strictEqual(calls, 1);
 });
+
+test("sway is kept, clamped, and sent to the sign compactly", () => {
+  const s = anim.normalizeSpec({ palette: { r: "#ff0000" }, sprites: [{ frames: [["r"]] }],
+    actors: [{ sprite: 0, sway: { x: 99, y: 2, ms: 50 }, phase: 300, keyframes: [{ t: 0, x: 1, y: 2 }, { t: 900, x: 1, y: 30 }] },
+             { sprite: 0, sway: { x: 0, y: 0, ms: 900 }, keyframes: [{ t: 0, x: 0, y: 0 }] }] });
+  assert.deepStrictEqual(s.actors[0].sway, { x: 30, y: 2, ms: 200 });
+  assert.strictEqual(s.actors[1].sway, undefined);
+  const d = anim.toDevice(s, "x");
+  assert.deepStrictEqual(d.a[0].w, [30, 2, 200]);
+  assert.strictEqual(d.a[0].p, 300);
+  assert.strictEqual(d.a[1].w, undefined);
+});
