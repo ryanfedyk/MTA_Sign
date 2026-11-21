@@ -234,7 +234,7 @@ itself to the latest release a few seconds after starting. Keep the IDE's
 
 1. Copy `firmware/mta_sign/secrets.example.h` to `firmware/mta_sign/secrets.h` and
    fill in your Wi-Fi name and password. `secrets.h` is never uploaded to GitHub.
-2. In the Arduino IDE, install the **esp32** board package (by Espressif) and these
+2. In the Arduino IDE, install the **esp32** board package (by Espressif) **version 3.3.12** (4.x doesn't work with the LED library yet) and these
    libraries: **ESP32 HUB75 LED MATRIX PANEL DMA Display**, **Adafruit GFX Library**,
    and **ArduinoJson** (version 7).
 3. Open `firmware/mta_sign/mta_sign.ino`, select **ESP32S3 Dev Module**, and upload.
