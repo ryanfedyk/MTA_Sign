@@ -242,25 +242,35 @@ function extractJson(text) {
   return JSON.parse(t.slice(start, end + 1));
 }
 
-const isBusy = (e) => e.status === 429 || e.status === 503 || /high demand|overloaded|try again later/i.test(e.message);
+// "Busy" = worth retrying (rate limits, overload, a slow or runaway answer).
+const isBusy = (e) => e.status === 429 || e.status === 503 || e.status === 504 || e.slow ||
+  /high demand|overloaded|try again later|unavailable/i.test(e.message);
 
 // Gemini sometimes answers "high demand" / rate limited for a few seconds:
 // wait and try again before giving up.
 async function callGemini(opts) {
-  const waits = opts.retryWaits ?? [3000, 8000, 15000];
+  const waits = opts.retryWaits ?? [3000, 8000];
   for (let i = 0; ; i++) {
     try {
       return await callGeminiOnce(opts);
     } catch (e) {
-      if (!isBusy(e) || i >= waits.length) throw e;
+      if (!isBusy(e) || e.slow || i >= waits.length || opts.deadline - Date.now() < waits[i] + 20000) throw e;
       await new Promise((r) => setTimeout(r, waits[i]));
     }
   }
 }
 
-async function callGeminiOnce({ apiKey, model, contents, fetchImpl = fetch, timeoutMs = 240000, lowThinking = true }) {
+// An answer is a few thousand tokens. Without a cap, a model that gets stuck
+// repeating sprite rows ("......") keeps writing for minutes.
+const MAX_OUTPUT_TOKENS = 12000;
+
+async function callGeminiOnce({ apiKey, model, contents, fetchImpl = fetch, timeoutMs = 100000, deadline = Infinity,
+  lowThinking = true, onAttempt = () => {} }) {
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  const limit = Math.max(5000, Math.min(timeoutMs, deadline - Date.now()));
+  const timer = setTimeout(() => ctl.abort(), limit);
+  const t0 = Date.now();
+  const report = (extra) => onAttempt({ model, seconds: +((Date.now() - t0) / 1000).toFixed(1), ...extra });
   try {
     const res = await fetchImpl(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
@@ -273,7 +283,8 @@ async function callGeminiOnce({ apiKey, model, contents, fetchImpl = fetch, time
           contents,
           generationConfig: {
             responseMimeType: "application/json",
-            temperature: 0.9,
+            temperature: 0.7,
+            maxOutputTokens: MAX_OUTPUT_TOKENS,
             // Pixel art doesn't need long deliberation; this makes answers much faster.
             ...(lowThinking ? { thinkingConfig: { thinkingLevel: "low" } } : {}),
           },
@@ -283,49 +294,57 @@ async function callGeminiOnce({ apiKey, model, contents, fetchImpl = fetch, time
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       const msg = body?.error?.message || `HTTP ${res.status}`;
+      report({ http: res.status, error: msg.slice(0, 200) });
       // Older/other models may not accept thinkingLevel: retry once without it.
       if (lowThinking && res.status === 400 && /thinking/i.test(msg)) {
-        return callGeminiOnce({ apiKey, model, contents, fetchImpl, timeoutMs, lowThinking: false });
+        return callGeminiOnce({ apiKey, model, contents, fetchImpl, timeoutMs, deadline, lowThinking: false, onAttempt });
       }
       const err = new Error(`Gemini error: ${msg}`);
       err.status = res.status;
       throw err;
     }
-    const parts = body?.candidates?.[0]?.content?.parts || [];
+    const cand = body?.candidates?.[0] || {};
+    const parts = cand.content?.parts || [];
     const text = parts.filter((p) => !p.thought && typeof p.text === "string").map((p) => p.text).join("");
-    if (!text) throw new Error("Gemini returned an empty answer" + (body?.candidates?.[0]?.finishReason ? ` (${body.candidates[0].finishReason})` : ""));
-    return text;
+    const u = body.usageMetadata || {};
+    report({ http: 200, finish: cand.finishReason, outTokens: u.candidatesTokenCount, thinkTokens: u.thoughtsTokenCount, chars: text.length });
+    if (!text) throw new Error("Gemini returned an empty answer" + (cand.finishReason ? ` (${cand.finishReason})` : ""));
+    return { text, truncated: cand.finishReason === "MAX_TOKENS" };
   } catch (e) {
-    if (e.name === "AbortError") throw new Error("Gemini took too long to answer. Try a simpler idea or try again.");
+    if (e.name === "AbortError") {
+      report({ timeout: true });
+      const err = new Error("Gemini took too long to answer. Try again in a minute.");
+      err.slow = true;
+      throw err;
+    }
     throw e;
   } finally {
     clearTimeout(timer);
   }
 }
 
-/**
- * Ask Gemini for an animation. Retries once, telling Gemini what was wrong,
- * if the first answer can't be used.
- */
+// Tried in order when the chosen model is overloaded or too slow.
 const FALLBACK_MODELS = ["gemini-3.6-flash"];
+const TOTAL_BUDGET_MS = 270000;   // the app function times out at 300 s
 
 /**
- * Ask Gemini for an animation. If the chosen model stays overloaded, fall
- * back to another Gemini model before giving up.
+ * Ask Gemini for an animation. If the chosen model stays overloaded or slow,
+ * fall back to another Gemini model before giving up.
  */
 async function generateAnimation(prompt, opts = {}) {
   const models = [opts.model || "gemini-3.8-flash", ...FALLBACK_MODELS.filter((m) => m !== opts.model)];
+  const deadline = Date.now() + (opts.budgetMs ?? TOTAL_BUDGET_MS);
   for (let i = 0; ; i++) {
     try {
-      return await generateWith(prompt, { ...opts, model: models[i] });
+      return await generateWith(prompt, { ...opts, model: models[i], deadline });
     } catch (e) {
-      if (!isBusy(e) || i + 1 >= models.length) throw e;
-      console.warn(`Gemini model ${models[i]} is busy, trying ${models[i + 1]}`);
+      if (!isBusy(e) || i + 1 >= models.length || deadline - Date.now() < 30000) throw e;
+      console.warn(`Gemini model ${models[i]} is busy or slow (${e.message}), trying ${models[i + 1]}`);
     }
   }
 }
 
-async function generateWith(prompt, { apiKey, model, fetchImpl = fetch, retryWaits } = {}) {
+async function generateWith(prompt, { apiKey, model, fetchImpl = fetch, retryWaits, deadline = Infinity, timeoutMs, onAttempt } = {}) {
   if (!apiKey) throw new Error("Gemini isn't set up yet (add the GEMINI_API_KEY secret and redeploy).");
   const request = String(prompt || "").trim().slice(0, LIMITS.maxPromptLength);
   if (!request) throw new Error("Describe the animation you want");
@@ -333,16 +352,18 @@ async function generateWith(prompt, { apiKey, model, fetchImpl = fetch, retryWai
   const contents = [{ role: "user", parts: [{ text: request }] }];
   let lastErr;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const text = await callGemini({ apiKey, model, contents, fetchImpl, retryWaits });
+    if (attempt && deadline - Date.now() < 20000) break;
+    const { text, truncated } = await callGemini({ apiKey, model, contents, fetchImpl, retryWaits, deadline, timeoutMs, onAttempt });
     try {
+      if (truncated) throw new Error("the answer was too long and got cut off; use library assets and keep new sprites small");
       return normalizeSpec(extractJson(text));
     } catch (e) {
       lastErr = e;
-      contents.push({ role: "model", parts: [{ text }] });
-      contents.push({ role: "user", parts: [{ text: `That JSON can't be used: ${e.message}. Reply with the corrected JSON only.` }] });
+      contents.push({ role: "model", parts: [{ text: truncated ? text.slice(0, 2000) : text }] });
+      contents.push({ role: "user", parts: [{ text: `That JSON can't be used: ${e.message}. Reply with the corrected, complete JSON only.` }] });
     }
   }
-  throw new Error(`Gemini's animation wasn't usable (${lastErr.message}). Try rephrasing.`);
+  throw new Error(`Gemini's animation wasn't usable (${lastErr ? lastErr.message : "ran out of time"}). Try rephrasing.`);
 }
 
 module.exports = { LIMITS, IMAGE_W, IMAGE_H, normalizeSpec, expandAssets, toDevice, generateAnimation, extractJson, SYSTEM_PROMPT, EXAMPLE };

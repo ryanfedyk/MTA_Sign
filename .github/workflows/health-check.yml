@@ -18,6 +18,10 @@ on:
         description: "Also ask Gemini for a test animation (saved, then deleted)"
         type: boolean
         default: false
+      gemini_probe:
+        description: "Also call Gemini directly and report timing/tokens for each attempt"
+        type: boolean
+        default: false
 
 jobs:
   check:
@@ -102,3 +106,25 @@ jobs:
           echo " - /app HTTP 503 mentioning the database -> Firestore isn't set up (see README)."
           echo " - /app HTTP 401 -> the passphrase secret doesn't match what was deployed; re-run the deploy."
           echo " - lastSeenSecondsAgo null or large -> the sign isn't reaching /sign."
+
+  gemini-probe:
+    if: ${{ inputs.gemini_probe }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Call Gemini directly
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+        run: |
+          if [ -z "$GEMINI_API_KEY" ]; then echo "GEMINI_API_KEY secret is not set"; exit 0; fi
+          echo "configured model: ${GEMINI_MODEL:-default}"
+          for p in "a small cat walks across the bottom of the sign" "snow falls while a snowman waves"; do
+            echo "== $p"
+            node tools/gemini-probe.js "$p"
+          done
+          echo "== fallback model only"
+          node tools/gemini-probe.js "a bird flies over a sleeping cat" gemini-3.6-flash
