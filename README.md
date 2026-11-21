@@ -165,6 +165,11 @@ gcloud services enable firestore.googleapis.com --project mta-transit-matrix && 
   go to the Actions tab and run **Check sign health**. It shows what the sign receives,
   whether the passphrase works, and when the sign last checked in. Tick "send a test cat"
   to test the whole path end to end.
+- **Create with Gemini fails or is slow:** run **Check sign health** with "call Gemini
+  directly" ticked. For each test prompt it shows how long Gemini took, whether it timed
+  out or was rate-limited, and what it drew. The cloud already retries busy or hung
+  requests (a second request starts after 25 s, then the backup model), so an error that
+  persists usually means the key's quota or billing (shown as HTTP 429 or 403).
 
 ## Seasonal packs
 
