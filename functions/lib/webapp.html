@@ -989,7 +989,7 @@ $("gen").onclick = async () => {
   if (bgPick === "black") prompt += "\n(Use background \"black\": a full-screen scene.)";
   const btn = $("gen"); btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span>Gemini is drawing…';
-  $("genNote").textContent = "This can take up to a couple of minutes.";
+  $("genNote").textContent = "Usually takes 20–40 seconds.";
   try {
     const d = await api("animations/generate", { prompt });
     current = LIB.find((x) => x.id === d.animation.id) || d.animation;

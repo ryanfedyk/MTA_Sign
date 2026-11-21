@@ -238,3 +238,31 @@ test("the example Gemini is shown is itself valid and uses the library", () => {
   assert.ok(spec.actors.length >= 4);
   assert.ok(spec.actors.some((a) => a.phase));
 });
+
+test("a slow request is overtaken by a second one started alongside it", async () => {
+  let calls = 0, firstAborted = false;
+  const ok = { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(anim.EXAMPLE) }] } }] }) };
+  const fetchImpl = (url, opts) => {
+    calls++;
+    if (calls === 1) {
+      return new Promise((_, reject) => opts.signal.addEventListener("abort", () => {
+        firstAborted = true; reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+      }));
+    }
+    return Promise.resolve(ok);
+  };
+  const t0 = Date.now();
+  const spec = await anim.generateAnimation("cat", { apiKey: "k", fetchImpl, hedgeMs: 30, timeoutMs: 60000 });
+  assert.ok(spec.actors.length);
+  assert.ok(Date.now() - t0 < 2000, "should not wait for the hung request");
+  assert.strictEqual(calls, 2);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(firstAborted, "the hung request is cancelled");
+});
+
+test("a wrong API key fails right away instead of retrying", async () => {
+  let calls = 0;
+  const fetchImpl = async () => { calls++; return { ok: false, status: 403, json: async () => ({ error: { message: "API key not valid" } }) }; };
+  await assert.rejects(anim.generateAnimation("cat", { apiKey: "bad", fetchImpl }), /API key not valid/);
+  assert.strictEqual(calls, 1);
+});

@@ -264,7 +264,7 @@ async function callGemini(opts) {
     try {
       return await callGeminiOnce(opts);
     } catch (e) {
-      if (!isBusy(e) || e.slow || i >= waits.length || opts.deadline - Date.now() < waits[i] + 20000) throw e;
+      if (!isBusy(e) || e.slow || e.cancelled || i >= waits.length || opts.deadline - Date.now() < waits[i] + 20000) throw e;
       await new Promise((r) => setTimeout(r, waits[i]));
     }
   }
@@ -272,11 +272,12 @@ async function callGemini(opts) {
 
 // An answer is a few thousand tokens. Without a cap, a model that gets stuck
 // repeating sprite rows ("......") keeps writing for minutes.
-const MAX_OUTPUT_TOKENS = 12000;
+const MAX_OUTPUT_TOKENS = 8000;   // good answers use 1,000-3,000 (thinking included)
 
 async function callGeminiOnce({ apiKey, model, contents, fetchImpl = fetch, timeoutMs = 75000, deadline = Infinity,
-  lowThinking = true, onAttempt = () => {} }) {
+  lowThinking = true, onAttempt = () => {}, signal }) {
   const ctl = new AbortController();
+  if (signal) { if (signal.aborted) ctl.abort(); else signal.addEventListener("abort", () => ctl.abort(), { once: true }); }
   const limit = Math.max(5000, Math.min(timeoutMs, deadline - Date.now()));
   const timer = setTimeout(() => ctl.abort(), limit);
   const t0 = Date.now();
@@ -307,7 +308,7 @@ async function callGeminiOnce({ apiKey, model, contents, fetchImpl = fetch, time
       report({ http: res.status, error: msg.slice(0, 200) });
       // Older/other models may not accept thinkingLevel: retry once without it.
       if (lowThinking && res.status === 400 && /thinking/i.test(msg)) {
-        return callGeminiOnce({ apiKey, model, contents, fetchImpl, timeoutMs, deadline, lowThinking: false, onAttempt });
+        return callGeminiOnce({ apiKey, model, contents, fetchImpl, timeoutMs, deadline, lowThinking: false, onAttempt, signal });
       }
       const err = new Error(`Gemini error: ${msg}`);
       err.status = res.status;
@@ -322,6 +323,7 @@ async function callGeminiOnce({ apiKey, model, contents, fetchImpl = fetch, time
     return { text, truncated: cand.finishReason === "MAX_TOKENS" };
   } catch (e) {
     if (e.name === "AbortError") {
+      if (signal && signal.aborted) throw Object.assign(new Error("cancelled"), { cancelled: true });
       report({ timeout: true });
       const err = new Error("Gemini took too long to answer. Try again in a minute.");
       err.slow = true;
@@ -333,30 +335,69 @@ async function callGeminiOnce({ apiKey, model, contents, fetchImpl = fetch, time
   }
 }
 
-// Tried in order when the chosen model is overloaded or too slow.
+// Gemini usually answers in about 20 s, but now and then a request hangs. So
+// requests are "hedged": if there's no answer after HEDGE_MS, another request
+// starts alongside it (then one on the fallback model), and the first usable
+// animation wins. A request that fails starts the next one right away.
 const DEFAULT_MODEL = "gemini-3.6-flash";
 const FALLBACK_MODELS = ["gemini-3.8-flash"];
 const TOTAL_BUDGET_MS = 270000;   // the app function times out at 300 s
+const HEDGE_MS = 25000;
+// Wrong key, bad request, no access: no point trying again.
+const isFatal = (e) => [400, 401, 403, 404].includes(e.status);
 
-/**
- * Ask Gemini for an animation. If the chosen model stays overloaded or slow,
- * fall back to another Gemini model before giving up.
- */
-async function generateAnimation(prompt, opts = {}) {
+function generateAnimation(prompt, opts = {}) {
   const first = opts.model || DEFAULT_MODEL;
-  const models = [first, ...FALLBACK_MODELS.filter((m) => m !== first)];
+  const plan = [first, first, ...FALLBACK_MODELS.filter((m) => m !== first), first];
+  const hedgeMs = opts.hedgeMs ?? HEDGE_MS;
   const deadline = Date.now() + (opts.budgetMs ?? TOTAL_BUDGET_MS);
-  for (let i = 0; ; i++) {
-    try {
-      return await generateWith(prompt, { ...opts, model: models[i], deadline });
-    } catch (e) {
-      if (!isBusy(e) || i + 1 >= models.length || deadline - Date.now() < 30000) throw e;
-      console.warn(`Gemini model ${models[i]} is busy or slow (${e.message}), trying ${models[i + 1]}`);
-    }
-  }
+  const stop = new AbortController();
+  return new Promise((resolve, reject) => {
+    let next = 0, running = 0, finished = false, timer = null;
+    const errors = [];
+    const finish = (fn, v) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      stop.abort();   // cancel any request still running
+      fn(v);
+    };
+    const launch = () => {
+      clearTimeout(timer);
+      if (finished) return;
+      if (next >= plan.length || deadline - Date.now() < 15000) {
+        if (!running) finish(reject, bestError(errors));
+        return;
+      }
+      const model = plan[next++];
+      if (next > 1) console.warn(`Gemini: starting request ${next} (${model})`);
+      running++;
+      generateWith(prompt, { ...opts, model, deadline, signal: stop.signal }).then(
+        (spec) => finish(resolve, spec),
+        (e) => {
+          running--;
+          if (e.cancelled) return;
+          errors.push(e);
+          if (isFatal(e)) return finish(reject, e);
+          launch();   // try the next one now instead of waiting
+        });
+      timer = setTimeout(launch, hedgeMs);
+    };
+    launch();
+  });
 }
 
-async function generateWith(prompt, { apiKey, model, fetchImpl = fetch, retryWaits, deadline = Infinity, timeoutMs, onAttempt } = {}) {
+function bestError(errors) {
+  if (!errors.length) return new Error("Gemini didn't answer in time. Try again in a minute.");
+  if (errors.every((e) => isBusy(e))) {
+    const e = new Error("Gemini is very busy right now. Try again in a minute.");
+    e.status = errors.some((x) => x.status === 429) ? 429 : 503;
+    return e;
+  }
+  return errors.find((e) => !isBusy(e)) || errors[errors.length - 1];
+}
+
+async function generateWith(prompt, { apiKey, model, fetchImpl = fetch, retryWaits, deadline = Infinity, timeoutMs, onAttempt, signal } = {}) {
   if (!apiKey) throw new Error("Gemini isn't set up yet (add the GEMINI_API_KEY secret and redeploy).");
   const request = String(prompt || "").trim().slice(0, LIMITS.maxPromptLength);
   if (!request) throw new Error("Describe the animation you want");
@@ -365,7 +406,7 @@ async function generateWith(prompt, { apiKey, model, fetchImpl = fetch, retryWai
   let lastErr;
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt && deadline - Date.now() < 20000) break;
-    const { text, truncated } = await callGemini({ apiKey, model, contents, fetchImpl, retryWaits, deadline, timeoutMs, onAttempt });
+    const { text, truncated } = await callGemini({ apiKey, model, contents, fetchImpl, retryWaits, deadline, timeoutMs, onAttempt, signal });
     try {
       if (truncated) throw new Error("the answer was too long and got cut off; use library assets and keep new sprites small");
       return normalizeSpec(extractJson(text));
