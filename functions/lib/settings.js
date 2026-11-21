@@ -45,11 +45,20 @@ function withDefaults(data = {}) {
     msg: data.msg || null,
     device: data.device || null,
     lib: { v: (data.lib && data.lib.v) || 0 },
+    packs: cleanPacks(data.packs),     // seasonal packs: { christmas: { on: true, idle: true } }
     schedule: {
       blocks: (data.schedule && Array.isArray(data.schedule.blocks)) ? data.schedule.blocks : null,
       fallback: (data.schedule && data.schedule.fallback) || "clock",   // what times outside every period show
     },
   };
+}
+
+function cleanPacks(p) {
+  const out = {};
+  if (p && typeof p === "object") {
+    for (const [id, v] of Object.entries(p)) if (v && v.on) out[id] = { on: true, idle: Boolean(v.idle) };
+  }
+  return out;
 }
 
 /** Keep messages to characters the LED font can draw. */
@@ -140,6 +149,8 @@ function appView(cfg, nowMs = Date.now()) {
     clock: cfg.clock,
     lastSeenSecondsAgo: cfg.device?.lastSeen ? Math.round((nowMs - cfg.device.lastSeen) / 1000) : null,
     firmware: cfg.device?.fw ?? null,
+    freeMemory: cfg.device?.heap ?? null,       // bytes free on the sign (newer firmware reports it)
+    lowestMemory: cfg.device?.minHeap ?? null,
     animations: ANIMATIONS,
     idleStyles: IDLE_STYLES,
     limits: LIMITS,
@@ -174,9 +185,10 @@ function firestoreStore() {
         return entry;
       });
     },
-    async touchDevice(fw = null) {
-      await ref.set({ device: { lastSeen: Date.now(), ...(fw !== null ? { fw } : {}) } }, { merge: true });
+    async touchDevice(fw = null, mem = {}) {
+      await ref.set({ device: { lastSeen: Date.now(), ...(fw !== null ? { fw } : {}), ...mem } }, { merge: true });
     },
+    bumpLib,
 
     // ---- animation library (collection "animations") ----
     async listAnimations() {
@@ -236,7 +248,8 @@ function memoryStore(initial = {}) {
       data[kind] = entry;
       return entry;
     },
-    async touchDevice(fw = null) { merge(data, { device: { lastSeen: Date.now(), ...(fw !== null ? { fw } : {}) } }); },
+    async touchDevice(fw = null, mem = {}) { merge(data, { device: { lastSeen: Date.now(), ...(fw !== null ? { fw } : {}), ...mem } }); },
+    async bumpLib() { merge(data, { lib: { v: (data.lib?.v || 0) + 1 } }); },
     async listAnimations() {
       return Object.entries(anims).map(([id, d]) => fromDoc(id, d)).sort((a, b) => b.createdAt - a.createdAt);
     },

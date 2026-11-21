@@ -70,7 +70,7 @@ function gustLeaf(r, { y0, t0, t1, dir = 1, loops = 1.5, radius = 4 }) {
   return path(t0, t1, (u) => ({
     x: xa + (xb - xa) * u + rad * Math.sin(ph + u * loops * 6.28),
     y: y0 + rise * u + rad * Math.cos(ph + u * loops * 6.28),
-  }), 30);
+  }), Math.min(30, Math.round(8 + loops * 8)));
 }
 
 const LEAF_KEYS = ["leaf_r", "leaf_o", "leaf_y", "leaf_R", "leaf_n"];
@@ -135,7 +135,7 @@ function leafGust() {
     actors.push({ sprite: pick(r, LEAF_KEYS), phase: r() * 600,
       keyframes: gustLeaf(r, { y0: irange(r, 3, 26), t0, t1: Math.min(D, t0 + irange(r, 1700, 2300)), loops: range(r, 0.8, 1.8), radius: 4 }) });
   }
-  return scene({ name: "Leaves in the wind", duration: D, background: "transit",
+  return scene({ name: "Leaf gust", duration: D, background: "transit",
     sprites: { gust: { frame_ms: 160, frames: GUST }, ...leafSprites() }, actors }, AUTUMN);
 }
 
@@ -162,7 +162,7 @@ function turkeyGrove() {
     actors.push({ sprite: pick(r, LEAF_KEYS), phase: r() * 600,
       keyframes: fallingLeaf(r, { x0: left ? irange(r, 6, 16) : irange(r, 46, 56), y0: irange(r, 6, 14), y1: 29, t0, t1: Math.min(D, t0 + irange(r, 3000, 4000)) }) });
   }
-  return scene({ name: "Turkey in the grove", duration: D, sprites: {
+  return scene({ name: "Turkey grove", duration: D, sprites: {
     treeL: { frame_ms: 400, frames: [autumnTree(5)] }, treeR: { frame_ms: 400, frames: mirror([autumnTree(13)]) },
     walk: { frame_ms: 220, frames: TURKEY_WALK }, fan: { frame_ms: 260, frames: TURKEY_FAN }, ...leafSprites(),
     litterL: { frame_ms: 1000, frames: leafLitter(2) }, litterR: { frame_ms: 1000, frames: leafLitter(7) },
@@ -237,8 +237,8 @@ function santaNight(durationOverride) {
     ...sleighTeam(r, { t0: 500, t1: D - 300, y: 12, bob: 2 }),
   ];
   // a trail of sparkles behind the sleigh
-  for (let i = 0; i < 8; i++) {
-    const t = 1200 + i * 800, u = (t - 500) / (D - 800), x = Math.round(-80 + 148 * u) - 2;
+  for (let i = 0; i < 8; i++) {   // from when the sleigh is on screen
+    const t = 5600 + i * 400, u = (t - 500) / (D - 800), x = Math.round(-80 + 148 * u) - 2;
     actors.push({ sprite: "twinkle", phase: i * 200, keyframes: [{ t, x, y: 20 + (i % 3) }, { t: t + 900, x: x - 3, y: 24 + (i % 3) }] });
   }
   return scene({ name: "Santa's sleigh", duration: D, sprites: {
@@ -256,7 +256,7 @@ function santaFlyBy() {
 
 function rudolphWalk() {
   const D = 7000, y = 17;
-  return scene({ name: "Rudolph walks by", duration: D, background: "transit", sprites: {
+  return scene({ name: "Rudolph walks", duration: D, background: "transit", sprites: {
     rudolph: { frame_ms: 180, frames: RUDOLPH_WALK },
   }, actors: [{ sprite: "rudolph", outline: true, keyframes: [{ t: 0, x: -18, y }, { t: D, x: 66, y }] }] }, XMAS);
 }
@@ -266,9 +266,9 @@ function rudolphFlies() {
   const sky = NIGHT_SKY(9, 16, D);
   const fly = path(0, D, (u) => ({ x: -18 + 86 * u, y: 15 - 11 * Math.sin(u * 3.14) + 1.5 * Math.sin(u * 20) }), 28);
   const actors = [...sky];
-  for (let i = 0; i < 12; i++) {   // sparkles left behind
-    const k = fly[Math.min(fly.length - 1, 2 + i * 2)];
-    actors.push({ sprite: "star", phase: i * 130, keyframes: [{ t: k.t, x: k.x, y: k.y + 8 }, { t: k.t + 1000, x: k.x - 2, y: k.y + 11 }] });
+  for (let i = 0; i < 11; i++) {   // sparkles left behind
+    const k = fly[Math.min(fly.length - 1, 4 + i * 2)];
+    actors.push({ sprite: "star", phase: i * 130, keyframes: [{ t: k.t, x: k.x + 2, y: k.y + 9 }, { t: k.t + 1000, x: k.x, y: k.y + 12 }] });
   }
   actors.push({ sprite: "rudolph", keyframes: fly });
   return scene({ name: "Rudolph flies", duration: D, sprites: {
@@ -281,7 +281,7 @@ function elves() {
   const D = 7500, y = 19;
   const walk = (sprite, dx, ph, hop) => ({ sprite, outline: true, phase: ph,
     keyframes: path(0, D, (u) => ({ x: -26 + dx + 96 * u, y: y - (hop ? Math.abs(Math.sin(u * 28)) * 2 : 0) }), 30) });
-  return scene({ name: "Elves with a present", duration: D, background: "transit", sprites: {
+  return scene({ name: "Elves", duration: D, background: "transit", sprites: {
     elf: { frame_ms: 200, frames: ELF }, carry: { frame_ms: 200, frames: ELF_CARRY },
   }, actors: [walk("elf", 0, 0, true), walk("carry", 12, 200, false)] }, XMAS);
 }

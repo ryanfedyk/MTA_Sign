@@ -27,6 +27,7 @@ const { buildArrivals } = require("./lib/transit");
 const { currentAlerts } = require("./lib/alerts");
 const settings = require("./lib/settings");
 const animations = require("./lib/animations");
+const seasonal = require("./lib/packs");
 
 const HTTP_OPTS = { cors: true, memory: "256MiB", timeoutSeconds: 15 };
 
@@ -75,6 +76,7 @@ exports.transit = onRequest(HTTP_OPTS, async (req, res) => {
 // /sign  (ESP32 settings + commands)
 // ---------------------------------------------------------------------------
 let lastTouch = 0;
+exports._resetCheckIn = () => { lastTouch = 0; };   // for tests
 exports.sign = onRequest(HTTP_OPTS, async (req, res) => {
   let cfg;
   try {
@@ -86,8 +88,11 @@ exports.sign = onRequest(HTTP_OPTS, async (req, res) => {
   // Remember when the sign last checked in (at most once a minute).
   if (Date.now() - lastTouch > 60000) {
     lastTouch = Date.now();
-    const fw = Number.parseInt(req.query.fw, 10);
-    getStore().touchDevice(Number.isFinite(fw) ? fw : null).catch((e) => console.error("touchDevice:", e.message));
+    const num = (v) => { const n = Number.parseInt(v, 10); return Number.isFinite(n) ? n : null; };
+    const mem = {};
+    if (num(req.query.h) !== null) mem.heap = num(req.query.h);
+    if (num(req.query.mh) !== null) mem.minHeap = num(req.query.mh);
+    getStore().touchDevice(num(req.query.fw), mem).catch((e) => console.error("touchDevice:", e.message));
   }
   res.set("Cache-Control", "no-store");
   res.json(settings.deviceView(cfg));
@@ -96,29 +101,60 @@ exports.sign = onRequest(HTTP_OPTS, async (req, res) => {
 // ---------------------------------------------------------------------------
 // /anims  (ESP32 animation library)
 // ---------------------------------------------------------------------------
-async function deviceLibrary() {
+/** Everything the sign can play: your animations, then animations from added seasonal packs. */
+function libraryItems(cfg, list) {
+  const items = list.filter((a) => a.spec).map((a) => ({ id: a.id, spec: a.spec, idle: a.inIdle }));
+  for (const p of seasonal.packs()) {
+    const on = cfg.packs[p.id];
+    if (on) for (const a of p.animations) items.push({ id: a.id, spec: a.spec, idle: on.idle });
+  }
+  return items;
+}
+
+// Newer firmware (?page=N) downloads the library a page at a time, so the whole
+// thing never has to fit in the sign's memory as one JSON document.
+const PAGE_BYTES = 12000;
+const TOTAL_BYTES = 160000;
+async function deviceLibrary(page = null) {
   const s = getStore();
   const [cfg, list] = await Promise.all([s.get(), s.listAnimations()]);
-  const out = [];
-  let bytes = 0;
-  for (const a of list.slice(0, animations.LIMITS.maxLibrary)) {
-    if (!a.spec) continue;
-    const dev = animations.toDevice(a.spec, a.id, { idle: a.inIdle });
-    const size = JSON.stringify(dev).length;
-    if (bytes + size > animations.LIMITS.maxDeviceBytes) continue;   // keep the sign's download small
-    bytes += size;
-    out.push(dev);
+  const v = cfg.lib.v % 1e9;
+  const all = libraryItems(cfg, list);
+  if (page === null) {   // older firmware: one small download
+    const out = [];
+    let bytes = 0;
+    for (const a of all.slice(0, animations.LIMITS.maxLibrary)) {
+      const dev = animations.toDevice(a.spec, a.id, { idle: a.idle });
+      const size = JSON.stringify(dev).length;
+      if (bytes + size > animations.LIMITS.maxDeviceBytes) continue;
+      bytes += size;
+      out.push(dev);
+    }
+    return { v, a: out };
   }
-  return { v: cfg.lib.v % 1e9, a: out };
+  const pages = [[]];
+  let pageBytes = 0, total = 0;
+  for (const a of all) {
+    const dev = animations.toDevice(a.spec, a.id, { idle: a.idle });
+    const size = JSON.stringify(dev).length;
+    if (total + size > TOTAL_BYTES) continue;
+    total += size;
+    if (pageBytes && pageBytes + size > PAGE_BYTES) { pages.push([]); pageBytes = 0; }
+    pages[pages.length - 1].push(dev);
+    pageBytes += size;
+  }
+  return { v, n: pages.length, a: pages[Math.min(page, pages.length - 1)] || [] };
 }
+exports._deviceLibrary = deviceLibrary;   // for tests
 
 exports.anims = onRequest(HTTP_OPTS, async (req, res) => {
   res.set("Cache-Control", "no-store");
+  const page = req.query.page !== undefined ? Math.max(0, Number.parseInt(req.query.page, 10) || 0) : null;
   try {
-    res.json(await deviceLibrary());
+    res.json(await deviceLibrary(page));
   } catch (err) {
     console.error("anims:", err.message);
-    res.json({ v: 0, a: [] });
+    res.status(503).json({ error: "library unavailable" });   // the sign keeps what it has and retries
   }
 });
 
@@ -171,7 +207,7 @@ exports.app = onRequest({ ...HTTP_OPTS, memory: "512MiB", timeoutSeconds: 300 },
     if (req.method === "POST" && route === "/api/play") {
       const name = String(body.name || "");
       const builtin = settings.ANIMATIONS.some((a) => a.id === name);
-      const cloud = name.startsWith("c:") && (await s.listAnimations()).some((a) => "c:" + a.id === name);
+      const cloud = name.startsWith("c:") && libraryItems(await s.get(), await s.listAnimations()).some((a) => "c:" + a.id === name);
       if (!builtin && !cloud) return res.status(400).json({ error: "Unknown animation" });
       const entry = await s.command("anim", { name });
       return res.json({ ok: true, seq: entry.seq });
@@ -196,6 +232,29 @@ exports.app = onRequest({ ...HTTP_OPTS, memory: "512MiB", timeoutSeconds: 300 },
       const prompt = String(body.prompt).trim().slice(0, animations.LIMITS.maxPromptLength);
       const id = await s.addAnimation({ name: spec.name, prompt, spec, inIdle: false, createdAt: Date.now() });
       return res.json({ ok: true, animation: { id, name: spec.name, prompt, spec, inIdle: false } });
+    }
+    // ---- seasonal packs ----
+    if (req.method === "GET" && route === "/api/packs") {
+      const cfg = await s.get();
+      return res.json({ packs: seasonal.packs().map((p) => ({
+        id: p.id, name: p.name, blurb: p.blurb, on: Boolean(cfg.packs[p.id]), idle: Boolean(cfg.packs[p.id]?.idle),
+        animations: p.animations.map((a) => ({ id: a.id, name: a.spec.name, spec: a.spec })),
+      })) });
+    }
+    if (req.method === "POST" && route === "/api/packs") {
+      const pack = seasonal.findPack(String(body.id || ""));
+      if (!pack) return res.status(400).json({ error: "Unknown pack" });
+      const cfg = await s.get();
+      const cur = cfg.packs[pack.id] || { on: false, idle: false };
+      const on = body.on !== undefined ? Boolean(body.on) : cur.on;
+      const idle = on && (body.idle !== undefined ? Boolean(body.idle) : (cur.on ? cur.idle : true));   // new packs join the idle rotation
+      const patch = { packs: { [pack.id]: { on, idle } } };
+      // idle animations from packs only play when the idle style includes yours
+      if (idle && settings.ANIMATIONS.some((a) => a.id === cfg.idle.style)) patch.idle = { style: "mix" };
+      await s.update(patch);
+      await s.bumpLib();
+      const after = await s.get();
+      return res.json({ ok: true, on, idle, idleStyle: after.idle.style });
     }
     // ---- schedule ----
     if (route === "/api/schedule" && (req.method === "GET" || req.method === "POST")) {

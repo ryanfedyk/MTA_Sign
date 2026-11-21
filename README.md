@@ -166,6 +166,23 @@ gcloud services enable firestore.googleapis.com --project mta-transit-matrix && 
   whether the passphrase works, and when the sign last checked in. Tick "send a test cat"
   to test the whole path end to end.
 
+## Seasonal packs
+
+Ready-made holiday animations, under **Animations → Library → Seasonal packs**. Tap
+**Add to sign** and the pack downloads to the sign within a few seconds. Its animations
+join the idle rotation (the idle setting switches to **Mix** if it was a single cat),
+and you can tap any of them to play it right away. Turn off **Play in the idle
+rotation** to keep a pack without it playing on its own, or tap **Added ✓** to remove it.
+
+| Pack | Animations |
+| --- | --- |
+| Thanksgiving | Autumn gust (two trees, falling leaves, then a gust that tears leaves off and loops them across), Falling leaves (over the arrivals), Leaf gust (over the arrivals), Turkey strut (walks in, fans its tail, struts off), Turkey grove |
+| Christmas | Christmas trees (blinking lights, twinkling stars, snow), Snowfall (over the arrivals), Santa's sleigh (night sky, moon, reindeer team led by Rudolph), Santa flies by (over the arrivals), Rudolph walks, Rudolph flies, Elves, Snowman (waving, in the snow) |
+
+The art and motion live in `functions/lib/art.js` and `functions/lib/packs.js`. The same
+holiday sprites are in the Gemini sprite library, so prompts like "Santa flies over the
+snowman" use them. Every firmware build's **screen-previews** include a GIF of each one.
+
 ## Make your own animations (no AI)
 
 Under **Make your own** in the control panel:
@@ -242,6 +259,10 @@ Test parameters:
 - `?dir=NB` / `?dir=SB` force a bus direction.
 - `?at=2026-11-08T10:00:00-05:00` shows which schedule would apply at another time.
 - `?debug=1` adds diagnostics.
+
+`GET /anims?page=N`: the animation library (your animations plus added packs), in pages of
+about 12 KB so the sign never holds the whole download at once. `n` is the page count and
+`v` the library version; the sign re-downloads whenever `lv` in `/sign` changes.
 
 `GET /sign` (polled by the sign every 5 s):
 

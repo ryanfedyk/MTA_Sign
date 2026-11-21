@@ -271,15 +271,30 @@ static CloudAnimPtr parseCloudAnim(JsonObjectConst o) {
   return a;
 }
 
+// Downloads the library a page at a time (seasonal packs make it too big for
+// one JSON document). The old library is dropped first so two copies are never
+// in memory together; an animation that's playing stays alive until it ends.
 static bool fetchLibrary() {
-  JsonDocument doc;
-  if (!httpGetJson(ANIMS_URL, doc)) return false;
+  xSemaphoreTake(gLock, portMAX_DELAY);
+  gLibrary.clear();
+  xSemaphoreGive(gLock);
   CloudLibrary lib;
-  for (JsonObjectConst o : doc["a"].as<JsonArrayConst>()) {
-    CloudAnimPtr a = parseCloudAnim(o);
-    if (a) lib.push_back(a);
+  uint32_t v = 0;
+  int pages = 1;
+  for (int p = 0; p < pages && p < 40; p++) {
+    char url[160];
+    snprintf(url, sizeof url, "%s?page=%d", ANIMS_URL, p);
+    JsonDocument doc;
+    if (!httpGetJson(url, doc)) return false;
+    uint32_t pv = doc["v"] | 0;
+    if (p == 0) v = pv;
+    else if (pv != v) return false;          // the library changed mid-download: start over
+    pages = doc["n"] | 1;
+    for (JsonObjectConst o : doc["a"].as<JsonArrayConst>()) {
+      CloudAnimPtr a = parseCloudAnim(o);
+      if (a) lib.push_back(a);
+    }
   }
-  uint32_t v = doc["v"] | 0;
   xSemaphoreTake(gLock, portMAX_DELAY);
   gLibrary = std::move(lib);
   gLoadedLibVersion = v;
@@ -292,7 +307,8 @@ static bool fetchLibrary() {
 static void fetchSign() {
   JsonDocument doc;
   static char url[160];
-  snprintf(url, sizeof url, "%s?fw=%d", SIGN_URL, FW_VERSION);   // lets the app show the firmware version
+  snprintf(url, sizeof url, "%s?fw=%d&h=%u&mh=%u", SIGN_URL, FW_VERSION,   // lets the app show the firmware version and memory
+           (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
   if (!httpGetJson(url, doc)) return;
 
   SignSettings s;
@@ -334,7 +350,10 @@ static void fetchSign() {
   xSemaphoreTake(gLock, portMAX_DELAY);
   bool libStale = s.libVersion != gLoadedLibVersion;
   xSemaphoreGive(gLock);
-  if (libStale) fetchLibrary();
+  static uint32_t nextLibTry = 0;
+  if (libStale && (int32_t)(millis() - nextLibTry) >= 0) {
+    if (!fetchLibrary()) nextLibTry = millis() + 60000;   // don't hammer the cloud after a failure
+  }
 
   xSemaphoreTake(gLock, portMAX_DELAY);
   gSettings = s;
@@ -476,7 +495,11 @@ static void startIdle(const SignSettings& s, uint32_t now) {
   bool isMix = !strcmp(s.idleAnim, "mix"), isMine = !strcmp(s.idleAnim, "mine");
   if ((isMix || isMine) && !mine.empty()) {
     int builtins = isMix ? (ANIM_COUNT - ANIM_WALK) : 0;
-    int pick = random(0, builtins + (int)mine.size());
+    int total = builtins + (int)mine.size();
+    static int lastPick = -1;
+    int pick = random(0, total);
+    if (pick == lastPick && total > 1) pick = (pick + 1 + random(0, total - 1)) % total;   // no repeats in a row
+    lastPick = pick;
     if (pick >= builtins) {
       mode = MODE_ANIM; currentAnim = ANIM_NONE; currentCloud = mine[pick - builtins]; modeStart = now;
       return;

@@ -33,3 +33,11 @@ node -e 'process.stdout.write(JSON.stringify(require(process.argv[1]).EXAMPLE))'
 node "$HERE/anim2txt.js" "$WORK/example.json" > "$WORK/example.txt"
 "$WORK/sim" cloud "$WORK/cloud.rgb" "$WORK/example.txt" >/dev/null
 python3 "$HERE/render_gif.py" "$WORK/cloud.rgb" "$OUT/cloud-example.gif"
+
+# Seasonal packs (functions/lib/packs.js)
+for id in $(node -e 'for (const p of require(process.argv[1]).packs()) for (const a of p.animations) console.log(a.id)' "$HERE/../../functions/lib/packs.js"); do
+  node -e 'process.stdout.write(JSON.stringify(require(process.argv[1]).packAnimation(process.argv[2]).spec))' "$HERE/../../functions/lib/packs.js" "$id" > "$WORK/$id.json"
+  node "$HERE/anim2txt.js" "$WORK/$id.json" > "$WORK/$id.txt"
+  "$WORK/sim" cloud "$WORK/$id.rgb" "$WORK/$id.txt" >/dev/null
+  python3 "$HERE/render_gif.py" "$WORK/$id.rgb" "$OUT/pack-$id.gif"
+done

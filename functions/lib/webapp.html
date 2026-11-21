@@ -98,6 +98,19 @@
   .tile .nm { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tile .acts { display: flex; gap: 6px; margin-top: 8px; }
   .tile .acts button { flex: 1; background: var(--card2); border: 1px solid var(--line); color: var(--text); border-radius: 9px; padding: 7px 0; font: inherit; font-size: 13px; cursor: pointer; }
+  .pack { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 14px; }
+  .pack:first-child { border-top: 0; padding-top: 0; margin-top: 6px; }
+  .pack h3 { margin: 0; font-size: 17px; }
+  .pack .sub { margin: 2px 0 0; }
+  .pack .lib { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+  .pack .tile .meta2 { padding: 5px 7px 7px; }
+  .pack .tile .nm { font-size: 12px; }
+  .pack .tile { cursor: pointer; }
+  .pack.off .tile { opacity: .75; }
+  .pill { flex: none; border-radius: 99px; padding: 9px 16px; font: inherit; font-weight: 650; font-size: 14px; cursor: pointer;
+          background: var(--accent); color: var(--on-accent); border: 1px solid var(--accent); }
+  .pill.done { background: var(--card2); color: var(--text); border-color: var(--line); }
+  .pack .idlerow { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; font-size: 14px; }
   .tile .acts button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
   .note { font-size: 13px; color: var(--muted); }
   .empty { font-size: 14px; color: var(--muted); text-align: center; padding: 14px 0 4px; }
@@ -333,6 +346,11 @@
       <div class="subnav seg" id="animSub"><button data-v="library" class="sel">Library</button><button data-v="create">Create</button><button data-v="idle">Idle</button></div>
 
       <div class="sub-page" data-sub="library">
+        <section class="card" id="packsCard">
+          <h2>Seasonal packs</h2>
+          <p class="sub">Ready-made holiday animations. Add a pack to put it on the sign; it joins the idle rotation, and you can tap any of its animations to play it now.</p>
+          <div id="packs"><div class="empty">Loading…</div></div>
+        </section>
         <section class="card">
           <h2>Built-in cats</h2>
           <div class="cats" id="catsLib"></div>
@@ -422,7 +440,7 @@
           <div class="seg wrap" id="style">
             <button data-v="walk">Stroll</button><button data-v="chase">Yarn</button><button data-v="peek">Peek</button><button data-v="mix">Mix</button><button data-v="mine">Mine</button>
           </div>
-          <p class="hint">Mix = built-in cats + your animations marked Idle. Mine = only yours.</p>
+          <p class="hint">Mix = built-in cats + your animations marked Idle + seasonal packs you've added. Mine = only yours and the packs.</p>
         </section>
       </div>
     </div>
@@ -483,6 +501,7 @@
         <h2>Sign</h2>
         <div class="kv"><span>Status</span><span id="devStatus">…</span></div>
         <div class="kv"><span>Firmware</span><span id="devFw">…</span></div>
+        <div class="kv hidden" id="devMemRow"><span>Memory free</span><span id="devMem">…</span></div>
         <div class="kv"><span>Updates</span><span>Install automatically</span></div>
         <a href="#" id="lock" class="link" style="display:inline-block;margin-top:12px">Forget passphrase on this device</a>
       </section>
@@ -562,7 +581,7 @@ function showGate(err) {
 $("gateForm").onsubmit = async (e) => {
   e.preventDefault();
   PIN = $("pin").value.trim(); if (!PIN) return;
-  try { await load(); localStorage.setItem("signPin", PIN); loadLib().catch(() => {}); loadSchedule().catch(() => {}); } catch (err) { if (err.message !== "locked") $("gateErr").textContent = err.message; }
+  try { await load(); localStorage.setItem("signPin", PIN); loadLib().catch(() => {}); loadPacks(); loadSchedule().catch(() => {}); } catch (err) { if (err.message !== "locked") $("gateErr").textContent = err.message; }
 };
 $("lock").onclick = (e) => { e.preventDefault(); localStorage.removeItem("signPin"); PIN = ""; showGate(); };
 
@@ -585,6 +604,8 @@ function render() {
     + (S.firmware ? " · v" + S.firmware : "");
   $("devStatus").textContent = ago === null ? "Never seen" : online ? `Online (checked in ${ago}s ago)` : "Offline · last seen " + fmtAgo(ago);
   $("devFw").textContent = S.firmware ? "v" + S.firmware : "—";
+  $("devMemRow").classList.toggle("hidden", !S.freeMemory);
+  if (S.freeMemory) $("devMem").textContent = `${Math.round(S.freeMemory / 1024)} KB (lowest ${Math.round((S.lowestMemory || S.freeMemory) / 1024)} KB)`;
   if (S.clock && !ckLoaded) { ckLoaded = true; CK = { ...S.clock }; renderClockCard(); }
 }
 function fmtAgo(s) { return s < 3600 ? Math.round(s / 60) + " min ago" : s < 86400 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " d ago"; }
@@ -891,6 +912,55 @@ async function loadLib() {
   if (!ASSETS) initMake().catch(() => {});
   $("gen").disabled = !d.geminiReady;
   $("genNote").textContent = d.geminiReady ? "" : "Gemini isn't connected yet: add the GEMINI_API_KEY secret in GitHub and re-run the deploy.";
+}
+
+// ---- seasonal packs ----
+let PACKS = null;
+async function loadPacks() {
+  try { PACKS = (await api("packs")).packs; renderPacks(); }
+  catch (e) { if (e.message !== "locked") $("packs").innerHTML = '<div class="empty">Couldn\'t load the packs.</div>'; }
+}
+function renderPacks() {
+  const box = $("packs"); box.innerHTML = "";
+  for (const p of PACKS) {
+    const el = document.createElement("div"); el.className = "pack" + (p.on ? "" : " off");
+    el.innerHTML = `<div class="between"><div><h3></h3><p class="sub"></p></div><button class="pill"></button></div>
+      <div class="idlerow ${p.on ? "" : "hidden"}"><span>Play in the idle rotation</span><label class="switch"><input type="checkbox"><i></i></label></div>
+      <div class="lib"></div>`;
+    el.querySelector("h3").textContent = p.name;
+    el.querySelector(".sub").textContent = `${p.blurb} ${p.animations.length} animations.`;
+    const btn = el.querySelector(".pill");
+    btn.textContent = p.on ? "Added ✓" : "Add to sign";
+    btn.classList.toggle("done", p.on);
+    btn.onclick = () => {
+      if (p.on && !confirm(`Remove the ${p.name} pack from the sign?`)) return;
+      setPack(p, { on: !p.on });
+    };
+    const idle = el.querySelector(".idlerow input");
+    idle.checked = p.idle;
+    idle.onchange = () => setPack(p, { idle: idle.checked });
+    for (const a of p.animations) {
+      const t = document.createElement("div"); t.className = "tile";
+      const cv = document.createElement("canvas"); cv.width = 128; cv.height = 64;
+      t.appendChild(cv); addPlayer(cv, a.spec, false);
+      const m = document.createElement("div"); m.className = "meta2"; m.innerHTML = '<div class="nm"></div>';
+      m.querySelector(".nm").textContent = a.name;
+      t.appendChild(m);
+      t.onclick = () => p.on ? playCloud(a) : toast(`Add the ${p.name} pack first`);
+      el.querySelector(".lib").appendChild(t);
+    }
+    box.appendChild(el);
+  }
+}
+async function setPack(p, patch) {
+  try {
+    const r = await api("packs", { id: p.id, ...patch });
+    p.on = r.on; p.idle = r.idle;
+    if (S && S.idle && r.idleStyle && S.idle.style !== r.idleStyle) { S.idle.style = r.idleStyle; render(); }
+    renderPacks();
+    toast(patch.on === true ? `${p.name} added — it'll reach the sign in a few seconds` : patch.on === false ? `${p.name} removed`
+      : r.idle ? "Added to the idle rotation" : "Removed from the idle rotation");
+  } catch (e) { toast(e.message); }
 }
 
 async function playCloud(a) {
@@ -1452,7 +1522,7 @@ route();
 (async () => {
   refreshPreview(); setInterval(refreshPreview, 30000);
   if (!PIN) return showGate();
-  try { await load(); loadLib().catch((e) => { $("genNote").textContent = e.message; }); loadSchedule().catch(() => {}); }
+  try { await load(); loadLib().catch((e) => { $("genNote").textContent = e.message; }); loadSchedule().catch(() => {}); loadPacks(); }
   catch (e) { if (e.message !== "locked") { $("ui").classList.remove("hidden"); banner(e.message); } }
   setInterval(() => { if (PIN && !document.hidden) api("settings").then((d) => { S = d; render(); }).catch(() => {}); }, 20000);
 })();
