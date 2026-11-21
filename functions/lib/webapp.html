@@ -856,7 +856,7 @@ function tick(now) {
 requestAnimationFrame(tick);
 
 // ---- create with gemini + library ----
-const IDEAS = ["A cat chases a red laser dot", "Fireworks over the sign", "A sleepy cat yawns and curls up", "Snow falling on a cat"];
+const IDEAS = ["A cat chases a red laser dot", "Santa flies over a snowman", "A turkey chases falling leaves", "A sleepy cat yawns and curls up", "Fireworks over the sign"];
 IDEAS.forEach((q) => {
   const c = document.createElement("button"); c.className = "chip"; c.textContent = q;
   c.onclick = () => { $("prompt").value = q; };
