@@ -348,7 +348,7 @@
       <div class="sub-page" data-sub="library">
         <section class="card" id="packsCard">
           <h2>Seasonal packs</h2>
-          <p class="sub">Ready-made holiday animations. Add a pack to put it on the sign; it joins the idle rotation, and you can tap any of its animations to play it now.</p>
+          <p class="sub">Ready-made holiday animations. Add a pack to put it on the sign. Each animation has <b>Play</b> (show it now) and <b>Idle</b> (let it play on its own between arrivals).</p>
           <div id="packs"><div class="empty">Loading…</div></div>
         </section>
         <section class="card">
@@ -929,7 +929,7 @@ function renderPacks() {
   for (const p of PACKS) {
     const el = document.createElement("div"); el.className = "pack" + (p.on ? "" : " off");
     el.innerHTML = `<div class="between"><div><h3></h3><p class="sub"></p></div><button class="pill"></button></div>
-      <div class="idlerow ${p.on ? "" : "hidden"}"><span>Play in the idle rotation</span><label class="switch"><input type="checkbox"><i></i></label></div>
+      <div class="idlerow ${p.on ? "" : "hidden"}"><span>Play all in the idle rotation</span><label class="switch"><input type="checkbox"><i></i></label></div>
       <div class="lib"></div>`;
     el.querySelector("h3").textContent = p.name;
     el.querySelector(".sub").textContent = `${p.blurb} ${p.animations.length} animations.`;
@@ -947,22 +947,33 @@ function renderPacks() {
       const t = document.createElement("div"); t.className = "tile";
       const cv = document.createElement("canvas"); cv.width = 128; cv.height = 64;
       t.appendChild(cv); addPlayer(cv, a.spec, false);
-      const m = document.createElement("div"); m.className = "meta2"; m.innerHTML = '<div class="nm"></div>';
+      const m = document.createElement("div"); m.className = "meta2";
+      m.innerHTML = '<div class="nm"></div>' + (p.on ? '<div class="acts"><button data-a="play">Play</button><button data-a="idle">Idle</button></div>' : "");
       m.querySelector(".nm").textContent = a.name;
       t.appendChild(m);
-      t.onclick = () => p.on ? playCloud(a) : toast(`Add the ${p.name} pack first`);
+      if (p.on) {
+        const inIdle = p.idle && !(p.skip || []).includes(a.id);
+        const ib = m.querySelector('[data-a="idle"]');
+        ib.classList.toggle("on", inIdle);
+        ib.title = inIdle ? "Plays on its own between arrivals" : "Only plays when you tap Play";
+        m.querySelector('[data-a="play"]').onclick = (e) => { e.stopPropagation(); playCloud(a); };
+        ib.onclick = (e) => { e.stopPropagation(); setPack(p, { anim: a.id, idle: !inIdle }, a.name); };
+      } else {
+        t.onclick = () => toast(`Add the ${p.name} pack first`);
+      }
       el.querySelector(".lib").appendChild(t);
     }
     box.appendChild(el);
   }
 }
-async function setPack(p, patch) {
+async function setPack(p, patch, animName) {
   try {
     const r = await api("packs", { id: p.id, ...patch });
-    p.on = r.on; p.idle = r.idle;
+    p.on = r.on; p.idle = r.idle; p.skip = r.skip || [];
     if (S && S.idle && r.idleStyle && S.idle.style !== r.idleStyle) { S.idle.style = r.idleStyle; render(); }
     renderPacks();
-    toast(patch.on === true ? `${p.name} added — it'll reach the sign in a few seconds` : patch.on === false ? `${p.name} removed`
+    toast(animName ? (patch.idle ? `"${animName}" added to the idle rotation` : `"${animName}" won't play on its own`)
+      : patch.on === true ? `${p.name} added — it'll reach the sign in a few seconds` : patch.on === false ? `${p.name} removed`
       : r.idle ? "Added to the idle rotation" : "Removed from the idle rotation");
   } catch (e) { toast(e.message); }
 }

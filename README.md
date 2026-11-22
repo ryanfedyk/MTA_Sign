@@ -175,9 +175,11 @@ gcloud services enable firestore.googleapis.com --project mta-transit-matrix && 
 
 Ready-made holiday animations, under **Animations → Library → Seasonal packs**. Tap
 **Add to sign** and the pack downloads to the sign within a few seconds. Its animations
-join the idle rotation (the idle setting switches to **Mix** if it was a single cat),
-and you can tap any of them to play it right away. Turn off **Play in the idle
-rotation** to keep a pack without it playing on its own, or tap **Added ✓** to remove it.
+join the idle rotation (the idle setting switches to **Mix** if it was a single cat).
+Each animation in an added pack has two buttons: **Play** shows it now, and **Idle**
+(dark when on) decides whether it plays on its own between arrivals. The **Play all in
+the idle rotation** switch turns the whole pack's idle on or off at once. Tap **Added ✓**
+to remove the pack.
 
 | Pack | Animations |
 | --- | --- |

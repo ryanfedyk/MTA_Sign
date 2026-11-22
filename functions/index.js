@@ -106,7 +106,7 @@ function libraryItems(cfg, list) {
   const items = list.filter((a) => a.spec).map((a) => ({ id: a.id, spec: a.spec, idle: a.inIdle }));
   for (const p of seasonal.packs()) {
     const on = cfg.packs[p.id];
-    if (on) for (const a of p.animations) items.push({ id: a.id, spec: a.spec, idle: on.idle });
+    if (on) for (const a of p.animations) items.push({ id: a.id, spec: a.spec, idle: on.idle && !on.skip.includes(a.id) });
   }
   return items;
 }
@@ -238,6 +238,7 @@ exports.app = onRequest({ ...HTTP_OPTS, memory: "512MiB", timeoutSeconds: 300 },
       const cfg = await s.get();
       return res.json({ packs: seasonal.packs().map((p) => ({
         id: p.id, name: p.name, blurb: p.blurb, on: Boolean(cfg.packs[p.id]), idle: Boolean(cfg.packs[p.id]?.idle),
+        skip: cfg.packs[p.id]?.skip || [],
         animations: p.animations.map((a) => ({ id: a.id, name: a.spec.name, spec: a.spec })),
       })) });
     }
@@ -245,16 +246,30 @@ exports.app = onRequest({ ...HTTP_OPTS, memory: "512MiB", timeoutSeconds: 300 },
       const pack = seasonal.findPack(String(body.id || ""));
       if (!pack) return res.status(400).json({ error: "Unknown pack" });
       const cfg = await s.get();
-      const cur = cfg.packs[pack.id] || { on: false, idle: false };
-      const on = body.on !== undefined ? Boolean(body.on) : cur.on;
-      const idle = on && (body.idle !== undefined ? Boolean(body.idle) : (cur.on ? cur.idle : true));   // new packs join the idle rotation
-      const patch = { packs: { [pack.id]: { on, idle } } };
+      const cur = cfg.packs[pack.id] || { on: false, idle: false, skip: [] };
+      const ids = pack.animations.map((a) => a.id);
+      let on = body.on !== undefined ? Boolean(body.on) : cur.on;
+      let idle, skip;
+      if (body.anim !== undefined) {
+        // one animation in or out of the idle rotation
+        if (!ids.includes(body.anim)) return res.status(400).json({ error: "That animation isn't in this pack" });
+        if (!cur.on) return res.status(400).json({ error: `Add the ${pack.name} pack first` });
+        on = true;
+        const inIdle = new Set(cur.idle ? ids.filter((x) => !cur.skip.includes(x)) : []);
+        if (body.idle) inIdle.add(body.anim); else inIdle.delete(body.anim);
+        idle = inIdle.size > 0;
+        skip = idle ? ids.filter((x) => !inIdle.has(x)) : [];
+      } else {
+        idle = on && (body.idle !== undefined ? Boolean(body.idle) : (cur.on ? cur.idle : true));   // new packs join the idle rotation
+        skip = idle && body.idle === undefined && cur.on ? cur.skip : [];                            // the pack switch resets to all
+      }
+      const patch = { packs: { [pack.id]: { on, idle, skip } } };
       // idle animations from packs only play when the idle style includes yours
       if (idle && settings.ANIMATIONS.some((a) => a.id === cfg.idle.style)) patch.idle = { style: "mix" };
       await s.update(patch);
       await s.bumpLib();
       const after = await s.get();
-      return res.json({ ok: true, on, idle, idleStyle: after.idle.style });
+      return res.json({ ok: true, on, idle, skip, idleStyle: after.idle.style });
     }
     // ---- schedule ----
     if (route === "/api/schedule" && (req.method === "GET" || req.method === "POST")) {

@@ -56,7 +56,12 @@ function withDefaults(data = {}) {
 function cleanPacks(p) {
   const out = {};
   if (p && typeof p === "object") {
-    for (const [id, v] of Object.entries(p)) if (v && v.on) out[id] = { on: true, idle: Boolean(v.idle) };
+    for (const [id, v] of Object.entries(p)) {
+      if (!v || !v.on) continue;
+      // skip = animations in the pack kept out of the idle rotation
+      const skip = Array.isArray(v.skip) ? v.skip.filter((x) => typeof x === "string").slice(0, 40) : [];
+      out[id] = { on: true, idle: Boolean(v.idle), skip: v.idle ? skip : [] };
+    }
   }
   return out;
 }

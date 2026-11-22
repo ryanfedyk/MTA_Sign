@@ -100,3 +100,40 @@ test("the sign reports its free memory, shown in the app", async () => {
   const r = await call(app, { path: "/api/settings", headers: PIN });
   assert.deepStrictEqual([r.body.firmware, r.body.freeMemory, r.body.lowestMemory], [31, 123456, 98765]);
 });
+
+test("each pack animation can be in or out of the idle rotation on its own", async () => {
+  setStore(settings.memoryStore());
+  const idleOnSign = async () => {
+    const out = {};
+    for (let page = 0, pages = 1; page < pages; page++) {
+      const p = await call(anims, { query: { page } });
+      pages = p.body.n;
+      for (const a of p.body.a) out[a.id] = a.i;
+    }
+    return out;
+  };
+  let r = await call(app, { method: "POST", path: "/api/packs", headers: PIN, body: { id: "thanksgiving", anim: "thanksgiving.turkey", idle: true } });
+  assert.strictEqual(r.status, 400, "the pack has to be added first");
+
+  await call(app, { method: "POST", path: "/api/packs", headers: PIN, body: { id: "thanksgiving", on: true } });
+  r = await call(app, { method: "POST", path: "/api/packs", headers: PIN, body: { id: "thanksgiving", anim: "thanksgiving.leaves", idle: false } });
+  assert.deepStrictEqual([r.body.idle, r.body.skip], [true, ["thanksgiving.leaves"]]);
+  let sign = await idleOnSign();
+  assert.strictEqual(sign["thanksgiving.leaves"], 0);
+  assert.strictEqual(sign["thanksgiving.turkey"], 1);
+  assert.strictEqual((await call(app, { path: "/api/packs", headers: PIN })).body.packs[0].skip[0], "thanksgiving.leaves");
+
+  // turn the whole pack's idle off, then pick just one
+  await call(app, { method: "POST", path: "/api/packs", headers: PIN, body: { id: "thanksgiving", idle: false } });
+  r = await call(app, { method: "POST", path: "/api/packs", headers: PIN, body: { id: "thanksgiving", anim: "thanksgiving.turkey", idle: true } });
+  assert.strictEqual(r.body.idle, true);
+  sign = await idleOnSign();
+  assert.deepStrictEqual(Object.entries(sign).filter(([, i]) => i).map(([id]) => id), ["thanksgiving.turkey"]);
+
+  // taking the last one out turns the pack's idle off; the pack switch brings them all back
+  r = await call(app, { method: "POST", path: "/api/packs", headers: PIN, body: { id: "thanksgiving", anim: "thanksgiving.turkey", idle: false } });
+  assert.deepStrictEqual([r.body.idle, r.body.skip], [false, []]);
+  r = await call(app, { method: "POST", path: "/api/packs", headers: PIN, body: { id: "thanksgiving", idle: true } });
+  assert.deepStrictEqual([r.body.idle, r.body.skip], [true, []]);
+  assert.ok(Object.values(await idleOnSign()).every((i) => i === 1));
+});
