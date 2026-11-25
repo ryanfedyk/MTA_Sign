@@ -200,7 +200,7 @@ test("if the main model stays busy, a fallback Gemini model is used", async () =
   };
   const spec = await anim.generateAnimation("cat", { apiKey: "k", fetchImpl, retryWaits: [1] });
   assert.ok(spec.actors.length);
-  assert.ok(urls.some((u) => u.includes("gemini-3.8-flash")));
+  assert.ok(urls.some((u) => !u.includes(anim.DEFAULT_MODEL)), "a fallback model was used");
 });
 
 test("a model that hangs is abandoned for the fallback model", async () => {
@@ -216,7 +216,7 @@ test("a model that hangs is abandoned for the fallback model", async () => {
   const spec = await anim.generateAnimation("cat", { apiKey: "k", fetchImpl, timeoutMs: 50, budgetMs: 120000, onAttempt: (a) => attempts.push(a) });
   assert.ok(spec.actors.length);
   assert.ok(attempts[0].timeout);
-  assert.ok(urls.at(-1).includes("gemini-3.8-flash"));
+  assert.ok(!urls.at(-1).includes(anim.DEFAULT_MODEL), "a fallback model answered");
 });
 
 test("an answer cut off at the length cap is retried with feedback", async () => {

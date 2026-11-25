@@ -13,7 +13,7 @@
 //   MTA_BUS_KEY   MTA Bus Time API key
 //   SIGN_APP_PIN  passphrase for the control panel
 //   GEMINI_API_KEY  Google AI Studio key for generating animations (optional)
-//   GEMINI_MODEL    override the Gemini model (optional, default gemini-3.6-flash)
+//   GEMINI_MODEL    override the Gemini model (optional, default gemini-4-hydrogen)
 //   MTA_API_KEY     sent as x-api-key to the MTA service-alert feeds, if they require one (optional)
 
 const fs = require("fs");

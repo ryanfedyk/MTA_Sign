@@ -130,7 +130,7 @@ The repo is public, so passwords and keys are stored as **GitHub secrets**
 | `GEMINI_API_KEY` | *(Optional)* A Google AI Studio key, which enables "Create with Gemini". Get one at https://aistudio.google.com/apikey |
 
 To use a different Gemini model, add a repository **variable** (not a secret) named
-`GEMINI_MODEL`, e.g. `gemini-3.8-flash`. The default is `gemini-3.6-flash`, which has been the fastest and most reliable; if it is busy or slow the cloud tries `gemini-3.8-flash`.
+`GEMINI_MODEL`, e.g. `gemini-3.6-flash`. The default is `gemini-4-hydrogen` (Gemini 4 Hydrogen); if it is busy or slow the cloud tries `gemini-3.6-flash`, then `gemini-3.8-flash`.
 
 **Cloud Shell setup script.** This creates the account GitHub uses to deploy, and the
 settings database. It's safe to run again. Open https://shell.cloud.google.com, signed
@@ -168,7 +168,7 @@ gcloud services enable firestore.googleapis.com --project mta-transit-matrix && 
 - **Create with Gemini fails or is slow:** run **Check sign health** with "call Gemini
   directly" ticked. For each test prompt it shows how long Gemini took, whether it timed
   out or was rate-limited, and what it drew. The cloud already retries busy or hung
-  requests (a second request starts after 25 s, then the backup model), so an error that
+  requests (a second request starts after 25 s, then the backup models), so an error that
   persists usually means the key's quota or billing (shown as HTTP 429 or 403).
 
 ## Seasonal packs

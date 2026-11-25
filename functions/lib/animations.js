@@ -346,8 +346,8 @@ async function callGeminiOnce({ apiKey, model, contents, fetchImpl = fetch, time
 // requests are "hedged": if there's no answer after HEDGE_MS, another request
 // starts alongside it (then one on the fallback model), and the first usable
 // animation wins. A request that fails starts the next one right away.
-const DEFAULT_MODEL = "gemini-3.6-flash";
-const FALLBACK_MODELS = ["gemini-3.8-flash"];
+const DEFAULT_MODEL = "gemini-4-hydrogen";
+const FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-3.8-flash"];   // tried if Hydrogen is busy or slow
 const TOTAL_BUDGET_MS = 270000;   // the app function times out at 300 s
 const HEDGE_MS = 25000;
 // Wrong key, bad request, no access: no point trying again.
@@ -355,7 +355,7 @@ const isFatal = (e) => [400, 401, 403, 404].includes(e.status);
 
 function generateAnimation(prompt, opts = {}) {
   const first = opts.model || DEFAULT_MODEL;
-  const plan = [first, first, ...FALLBACK_MODELS.filter((m) => m !== first), first];
+  const plan = [first, first, ...FALLBACK_MODELS.filter((m) => m !== first), first];   // e.g. Hydrogen, Hydrogen, 3.6, 3.8, Hydrogen
   const hedgeMs = opts.hedgeMs ?? HEDGE_MS;
   const deadline = Date.now() + (opts.budgetMs ?? TOTAL_BUDGET_MS);
   const stop = new AbortController();
